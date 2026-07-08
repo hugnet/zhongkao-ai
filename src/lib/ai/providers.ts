@@ -1,5 +1,4 @@
-// LLM供应商配置 - 支持多种第三方API
-// 大多数国产LLM使用OpenAI兼容格式
+﻿// AI供应商配置 - 支持多种第三方API
 
 export interface LLMProvider {
   id: string;
@@ -9,11 +8,24 @@ export interface LLMProvider {
   apiKeyHint: string;
   apiKeyLabel: string;
   description: string;
-  freeTier: string; // 免费额度说明
-  isOpenAICompat: boolean; // 是否OpenAI兼容格式
+  freeTier: string;
+  isOpenAICompat: boolean;
+  useResponsesApi?: boolean;
 }
 
 export var PROVIDERS: LLMProvider[] = [
+  {
+    id: 'opencode-zen',
+    name: 'OpenCode Zen',
+    baseURL: 'https://opencode.ai/zen/v1',
+    model: 'DeepSeek-V4-Flash-Free',
+    apiKeyLabel: 'OpenCode Zen API Key',
+    apiKeyHint: 'sk-...',
+    description: 'OpenCode Zen平台，内置多款免费模型',
+    freeTier: 'MiMo/DeepSeek/Nemotron免费',
+    isOpenAICompat: true,
+    useResponsesApi: true,
+  },
   {
     id: 'deepseek',
     name: 'DeepSeek',
@@ -30,7 +42,7 @@ export var PROVIDERS: LLMProvider[] = [
     name: '通义千问',
     baseURL: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
     model: 'qwen-turbo',
-    apiKeyLabel: '阿里云 DashScope API Key',
+    apiKeyLabel: '阿里云DashScope API Key',
     apiKeyHint: 'sk-...',
     description: '阿里云大模型，qwen-turbo免费额度充足',
     freeTier: 'qwen-turbo 200万tokens/月免费',
@@ -66,20 +78,16 @@ export var PROVIDERS: LLMProvider[] = [
     apiKeyLabel: 'OpenAI API Key',
     apiKeyHint: 'sk-...',
     description: 'OpenAI官方接口，需海外支付方式',
-    freeTier: '注册送$5额度',
+    freeTier: '注册送',
     isOpenAICompat: true,
   },
-  {
-    id: 'agnes',
-    name: 'Agnes AI',
-    baseURL: 'https://api.agnes-ai.com/v1',
-    model: 'agnes-chat',
-    apiKeyLabel: 'Agnes API Key',
-    apiKeyHint: '输入你的Key',
-    description: '在work buddy中使用的AI服务',
-    freeTier: '视账户套餐而定',
-    isOpenAICompat: true,
-  },
+];
+
+// OpenCode Zen 免费模型列表
+export var ZEN_FREE_MODELS = [
+  { id: 'MiMo-V2.5-Free', name: 'MiMo V2.5', desc: '小米推理模型' },
+  { id: 'DeepSeek-V4-Flash-Free', name: 'DeepSeek V4 Flash', desc: '深度求索快速模型' },
+  { id: 'Nemotron-3-UItra-Free', name: 'Nemotron 3 Ultra', desc: '英伟达大模型' },
 ];
 
 export function getProvider(id: string): LLMProvider | undefined {
@@ -87,13 +95,8 @@ export function getProvider(id: string): LLMProvider | undefined {
 }
 
 export function buildChatURL(provider: LLMProvider): string {
+  if (provider.useResponsesApi) {
+    return provider.baseURL + '/responses';
+  }
   return provider.baseURL + '/chat/completions';
-}
-
-// 备选：用户可自定义供应商
-export interface CustomProvider {
-  name: string;
-  baseURL: string;
-  model: string;
-  apiKey: string;
 }
