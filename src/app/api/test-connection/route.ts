@@ -1,5 +1,4 @@
 ﻿import { NextRequest, NextResponse } from 'next/server';
-import { getProvider, buildChatURL } from '@/lib/ai/providers';
 
 function getDefaultApiKey(): string {
   return process.env.DEFAULT_API_KEY || '';
@@ -8,33 +7,48 @@ function getDefaultApiKey(): string {
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
-    const { providerId, apiKey, model } = body;
+    const { providerId, apiKey, model, baseUrl, protocol } = body;
 
-    const provider = getProvider(providerId || 'opencode-zen');
-    if (!provider) {
-      return NextResponse.json({ ok: false, error: '不支持的供应商' });
+    let useApiKey = apiKey;
+    let useBaseUrl = baseUrl;
+    let useModel = model || 'gpt-4o-mini';
+    let useProtocol = protocol || 'chat';
+
+    if (providerId === 'agnes' || (!apiKey && providerId !== 'custom')) {
+      useApiKey = getDefaultApiKey();
+      useBaseUrl = useBaseUrl || 'https://apihub.agnes-ai.com/v1';
+      useModel = useModel || 'agnes-2.0-flash';
     }
 
-    // 默认供应商使用服务端环境变量中的Key，第三方才用用户传入的Key
-    const useApiKey = providerId === 'opencode-zen' ? getDefaultApiKey() : apiKey;
     if (!useApiKey) {
-      return NextResponse.json({ ok: false, error: providerId === 'opencode-zen' ? '默认API未配置' : '请输入API Key' });
+      return NextResponse.json({ ok: false, error: '请输入API Key' });
+    }
+    if (!useBaseUrl) {
+      return NextResponse.json({ ok: false, error: '请输入Base URL' });
     }
 
-    const testModel = model || provider.model;
-    const url = buildChatURL(provider);
+    let url = useBaseUrl.replace(/\/$/, '');
+    if (useProtocol === 'responses') {
+      url += '/responses';
+    } else {
+      url += '/chat/completions';
+    }
 
-    let res: Response;
-    const testBody = provider.useResponsesApi ? {
-      model: testModel,
-      input: [{ role: 'user', content: 'Hello, reply with just "OK" in one word.' }],
-    } : {
-      model: testModel,
-      messages: [{ role: 'user', content: 'Hello, reply with just "OK" in one word.' }],
-      max_tokens: 10,
-    };
+    let testBody: any;
+    if (useProtocol === 'responses') {
+      testBody = {
+        model: useModel,
+        input: [{ role: 'user', content: 'Hello, reply with just "OK" in one word.' }],
+      };
+    } else {
+      testBody = {
+        model: useModel,
+        messages: [{ role: 'user', content: 'Hello, reply with just "OK" in one word.' }],
+        max_tokens: 10,
+      };
+    }
 
-    res = await fetch(url, {
+    const res = await fetch(url, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -45,16 +59,21 @@ export async function POST(req: NextRequest) {
 
     if (!res.ok) {
       const errText = await res.text().catch(() => '');
-      return NextResponse.json({
-        ok: false,
-        error: '连接失败 (HTTP ' + res.status + '): ' + (errText.slice(0, 200) || res.statusText),
-      });
+      let errMsg = 'HTTP ' + res.status;
+      try {
+        const errJson = JSON.parse(errText);
+        if (errJson.error) errMsg += ': ' + (typeof errJson.error === 'string' ? errJson.error : errJson.error.message || JSON.stringify(errJson.error));
+        else errMsg += ': ' + errText.slice(0, 150);
+      } catch(e) {
+        errMsg += ': ' + (errText.slice(0, 150) || res.statusText);
+      }
+      return NextResponse.json({ ok: false, error: errMsg });
     }
 
     const data = await res.json();
     let reply = '';
 
-    if (provider.useResponsesApi) {
+    if (useProtocol === 'responses') {
       if (data.output && Array.isArray(data.output)) {
         for (const item of data.output) {
           if (item.type === 'message' && item.content) {
@@ -71,11 +90,11 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json({
       ok: true,
-      model: testModel,
-      reply: reply.slice(0, 100),
-      message: '连接成功！模型 ' + testModel + ' 正常响应',
+      model: useModel,
+      reply: (reply || '').slice(0, 50),
+      message: '连接成功！模型 ' + useModel + ' 响应正常',
     });
   } catch (err: any) {
-    return NextResponse.json({ ok: false, error: '连接异常：' + (err.message || '未知错误') });
+    return NextResponse.json({ ok: false, error: '连接异常：' + (err.message || '网络错误') });
   }
 }
