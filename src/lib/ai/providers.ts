@@ -1,6 +1,4 @@
-﻿// AI供应商配置 - 支持多种第三方API
-
-export interface LLMProvider {
+﻿export interface LLMProvider {
   id: string;
   name: string;
   baseURL: string;
@@ -16,13 +14,13 @@ export interface LLMProvider {
 export var PROVIDERS: LLMProvider[] = [
   {
     id: 'opencode-zen',
-    name: 'OpenCode Zen',
+    name: 'PlatformAI',
     baseURL: 'https://opencode.ai/zen/v1',
-    model: 'DeepSeek-V4-Flash-Free',
-    apiKeyLabel: 'OpenCode Zen API Key',
+    model: 'MiMo-V2.5-Free',
+    apiKeyLabel: 'API Key',
     apiKeyHint: 'sk-...',
-    description: 'OpenCode Zen平台，内置多款免费模型',
-    freeTier: 'MiMo/DeepSeek/Nemotron免费',
+    description: '内置多模态AI，支持文本和图像理解',
+    freeTier: '免费使用',
     isOpenAICompat: true,
     useResponsesApi: true,
   },
@@ -33,7 +31,7 @@ export var PROVIDERS: LLMProvider[] = [
     model: 'deepseek-chat',
     apiKeyLabel: 'DeepSeek API Key',
     apiKeyHint: 'sk-...',
-    description: '深度求索大模型，中文能力强，价格低',
+    description: '深度求索大模型',
     freeTier: '注册送500万tokens',
     isOpenAICompat: true,
   },
@@ -42,10 +40,10 @@ export var PROVIDERS: LLMProvider[] = [
     name: '通义千问',
     baseURL: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
     model: 'qwen-turbo',
-    apiKeyLabel: '阿里云DashScope API Key',
+    apiKeyLabel: '阿里云 API Key',
     apiKeyHint: 'sk-...',
-    description: '阿里云大模型，qwen-turbo免费额度充足',
-    freeTier: 'qwen-turbo 200万tokens/月免费',
+    description: '阿里云大模型',
+    freeTier: '200万tokens/月免费',
     isOpenAICompat: true,
   },
   {
@@ -55,8 +53,8 @@ export var PROVIDERS: LLMProvider[] = [
     model: 'glm-4-flash',
     apiKeyLabel: '智谱 API Key',
     apiKeyHint: 'xxx.xxx',
-    description: '智谱AI，glm-4-flash完全免费',
-    freeTier: 'glm-4-flash 永久免费',
+    description: '智谱AI',
+    freeTier: 'glm-4-flash永久免费',
     isOpenAICompat: true,
   },
   {
@@ -66,7 +64,7 @@ export var PROVIDERS: LLMProvider[] = [
     model: 'SenseChat-5',
     apiKeyLabel: '商汤 API Key',
     apiKeyHint: 'sk-...',
-    description: '商汤科技大模型，SenseChat系列',
+    description: '商汤科技大模型',
     freeTier: '注册送体验额度',
     isOpenAICompat: true,
   },
@@ -77,17 +75,16 @@ export var PROVIDERS: LLMProvider[] = [
     model: 'gpt-4o-mini',
     apiKeyLabel: 'OpenAI API Key',
     apiKeyHint: 'sk-...',
-    description: 'OpenAI官方接口，需海外支付方式',
+    description: 'OpenAI官方接口',
     freeTier: '注册送',
     isOpenAICompat: true,
   },
 ];
 
-// OpenCode Zen 免费模型列表
 export var ZEN_FREE_MODELS = [
-  { id: 'MiMo-V2.5-Free', name: 'MiMo V2.5', desc: '小米推理模型' },
-  { id: 'DeepSeek-V4-Flash-Free', name: 'DeepSeek V4 Flash', desc: '深度求索快速模型' },
-  { id: 'Nemotron-3-UItra-Free', name: 'Nemotron 3 Ultra', desc: '英伟达大模型' },
+  { id: 'MiMo-V2.5-Free', name: 'MiMo V2.5', desc: '多模态' },
+  { id: 'DeepSeek-V4-Flash-Free', name: 'DeepSeek V4 Flash', desc: '快速' },
+  { id: 'Nemotron-3-UItra-Free', name: 'Nemotron 3 Ultra', desc: '英伟达' },
 ];
 
 export function getProvider(id: string): LLMProvider | undefined {

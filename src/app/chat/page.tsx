@@ -22,7 +22,6 @@ export default function ChatPage() {
   var [userId, setUserId] = useState<string | null>(null);
   var [showRecharge, setShowRecharge] = useState(false);
   var [lowBalance, setLowBalance] = useState(0);
-  var [creditWarning, setCreditWarning] = useState('');
   var messagesEndRef = useRef<HTMLDivElement>(null);
 
   useEffect(function() {
@@ -32,7 +31,7 @@ export default function ChatPage() {
   useEffect(function() {
     var stored = localStorage.getItem('zhongkao_user_id');
     if (!stored) {
-      stored = 'anon_' + generateId();
+      stored = 'user_' + generateId();
       localStorage.setItem('zhongkao_user_id', stored);
     }
     setUserId(stored);
@@ -47,7 +46,6 @@ export default function ChatPage() {
     setMessages(function(prev) { return [...prev, userMsg]; });
     setInput('');
     setLoading(true);
-    setCreditWarning('');
 
     try {
       var localKey = localStorage.getItem('zhongkao_custom_api_key') || '';
@@ -86,7 +84,7 @@ export default function ChatPage() {
           setShowRecharge(true);
           setMessages(function(prev) { return [...prev, { id: generateId(), role: 'assistant', content: '积分不足，请充值后继续使用。', agentId: currentAgent }]; });
         } else if (defaultData.error) {
-          setMessages(function(prev) { return [...prev, { id: generateId(), role: 'assistant', content: '出错了：' + defaultData.error, agentId: currentAgent }]; });
+          setMessages(function(prev) { return [...prev, { id: generateId(), role: 'assistant', content: '服务暂时不可用，请稍后重试。', agentId: currentAgent }]; });
         } else {
           setMessages(function(prev) { return [...prev, { id: generateId(), role: 'assistant', content: defaultData.content, agentId: currentAgent }]; });
           if (defaultData.credits >= 0 && defaultData.credits < 100) {
@@ -96,7 +94,7 @@ export default function ChatPage() {
         }
       }
     } catch (err: any) {
-      setMessages(function(prev) { return [...prev, { id: generateId(), role: 'assistant', content: '服务暂时不可用：' + (err.message || '请稍后再试'), agentId: currentAgent }]; });
+      setMessages(function(prev) { return [...prev, { id: generateId(), role: 'assistant', content: '服务暂时不可用，请稍后再试。', agentId: currentAgent }]; });
     }
     setLoading(false);
   }
@@ -120,7 +118,7 @@ export default function ChatPage() {
         <div className="mt-6 pt-4 border-t border-gray-200 space-y-3">
           <CreditBalance userId={userId} onLowCredits={function(b) { setLowBalance(b); setShowRecharge(true); }} />
           <a href="/settings" className="block text-xs text-gray-400 hover:text-blue-600 transition-colors">
-            &#9881; API与积分设置
+            &#9881; 设置
           </a>
         </div>
       </div>
@@ -132,7 +130,6 @@ export default function ChatPage() {
             <h2 className="font-bold text-gray-900">{agent?.name} · {agent?.title}</h2>
             <p className="text-sm text-gray-500">{agent?.description.slice(0, 60)}..</p>
           </div>
-          <span className="text-[10px] bg-green-50 text-green-600 px-2 py-1 rounded-full border border-green-200">免费使用</span>
         </div>
 
         <div className="flex-1 overflow-y-auto chat-messages space-y-4 pr-2">
@@ -140,7 +137,7 @@ export default function ChatPage() {
             <div className="text-center py-16">
               <span className="text-5xl block mb-4">{subject?.icon}</span>
               <h3 className="text-lg font-semibold text-gray-900 mb-2">向 {agent?.name} 提问</h3>
-              <p className="text-sm text-gray-500 max-w-md mx-auto">新用户赠送5000积分，可免费对话约500次</p>
+              <p className="text-sm text-gray-500 max-w-md mx-auto">选择下方技能标签快速提问，或直接输入你的问题</p>
               <div className="flex flex-wrap justify-center gap-2 mt-6">
                 {(agent?.skills || []).slice(0, 6).map(function(s) {
                   return (

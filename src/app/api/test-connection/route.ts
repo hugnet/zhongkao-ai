@@ -1,18 +1,24 @@
 ﻿import { NextRequest, NextResponse } from 'next/server';
-import { getProvider, buildChatURL, ZEN_FREE_MODELS } from '@/lib/ai/providers';
+import { getProvider, buildChatURL } from '@/lib/ai/providers';
+
+function getDefaultApiKey(): string {
+  return process.env.DEFAULT_API_KEY || '';
+}
 
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
     const { providerId, apiKey, model } = body;
 
-    if (!apiKey) {
-      return NextResponse.json({ ok: false, error: '请输入API Key' });
-    }
-
     const provider = getProvider(providerId || 'opencode-zen');
     if (!provider) {
       return NextResponse.json({ ok: false, error: '不支持的供应商' });
+    }
+
+    // 默认供应商使用服务端环境变量中的Key，第三方才用用户传入的Key
+    const useApiKey = providerId === 'opencode-zen' ? getDefaultApiKey() : apiKey;
+    if (!useApiKey) {
+      return NextResponse.json({ ok: false, error: providerId === 'opencode-zen' ? '默认API未配置' : '请输入API Key' });
     }
 
     const testModel = model || provider.model;
@@ -32,7 +38,7 @@ export async function POST(req: NextRequest) {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': 'Bearer ' + apiKey,
+        'Authorization': 'Bearer ' + useApiKey,
       },
       body: JSON.stringify(testBody),
     });
