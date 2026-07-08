@@ -16,6 +16,7 @@ export function Header() {
           <Link href="/skills" className="text-gray-600 hover:text-blue-600 transition-colors">技能地图</Link>
           <Link href="/settings" className="text-gray-600 hover:text-blue-600 transition-colors">设置</Link>
           <Link href="/login" className="text-gray-600 hover:text-blue-600 transition-colors">登录</Link>
+          <Link href="/admin" className="text-gray-300 hover:text-gray-400 text-xs" title="管理后台">&#9881;</Link>
         </nav>
       </div>
     </header>
