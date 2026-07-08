@@ -16,11 +16,13 @@ export async function POST(req: NextRequest) {
 
     var apiKey = getDefaultApiKey();
     if (!apiKey) {
+      console.error('[chat/default] DEFAULT_API_KEY not set');
       return NextResponse.json({ error: '服务未配置，请联系管理员' }, { status: 503 });
     }
 
     var provider = getProvider(DEFAULT_PROVIDER_ID);
     if (!provider) {
+      console.error('[chat/default] Provider not found:', DEFAULT_PROVIDER_ID);
       return NextResponse.json({ error: '配置错误' }, { status: 500 });
     }
 
@@ -42,6 +44,8 @@ export async function POST(req: NextRequest) {
     }
 
     var url = buildChatURL(provider);
+    console.log('[chat/default] Requesting:', url, 'model:', provider.model);
+
     var res = await fetch(url, {
       method: 'POST',
       headers: {
@@ -57,17 +61,36 @@ export async function POST(req: NextRequest) {
     });
 
     if (!res.ok) {
-      return NextResponse.json({ error: 'AI服务暂时不可用' }, { status: res.status });
+      var errText = await res.text().catch(function() { return ''; });
+      console.error('[chat/default] API error:', res.status, errText.slice(0, 500));
+      var errMsg = 'AI服务暂时不可用';
+      try {
+        var errJson = JSON.parse(errText);
+        if (errJson.error) {
+          errMsg = typeof errJson.error === 'string' ? errJson.error : (errJson.error.message || JSON.stringify(errJson.error));
+        }
+      } catch(e) {
+        if (errText) errMsg = errText.slice(0, 200);
+      }
+      return NextResponse.json({ error: errMsg }, { status: res.status });
     }
 
     var data = await res.json();
-    var content = data.choices && data.choices[0] && data.choices[0].message ? data.choices[0].message.content : '抱歉，暂时无法回答。';
+    var content = '';
+    if (data.choices && data.choices[0] && data.choices[0].message) {
+      content = data.choices[0].message.content || '';
+    }
+    if (!content) {
+      console.error('[chat/default] Empty response:', JSON.stringify(data).slice(0, 500));
+      content = '抱歉，暂时无法回答。';
+    }
 
-    await deductCredits(userId, CREDITS_PER_MESSAGE, 'AI对话消耗');
-    var remainingCredits = await getCredits(userId);
+    var deductResult = await deductCredits(userId, CREDITS_PER_MESSAGE, 'AI对话消耗');
+    var remainingCredits = deductResult.success ? deductResult.balance : credits - CREDITS_PER_MESSAGE;
 
     return NextResponse.json({ content: content, credits: remainingCredits });
   } catch (err: any) {
-    return NextResponse.json({ error: '服务暂时不可用' }, { status: 500 });
+    console.error('[chat/default] Exception:', err.message, err.stack);
+    return NextResponse.json({ error: '服务暂时不可用：' + (err.message || '未知错误') }, { status: 500 });
   }
 }

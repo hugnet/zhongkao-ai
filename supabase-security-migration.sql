@@ -4,35 +4,35 @@ DROP FUNCTION IF EXISTS public.handle_new_user_credits();
 
 -- 新函数：只在邮箱确认后才发放积分和创建设置
 CREATE OR REPLACE FUNCTION public.handle_email_confirmed()
-RETURNS trigger AS 
+RETURNS trigger AS $$
 BEGIN
   IF NEW.email_confirmed_at IS NOT NULL AND (OLD.email_confirmed_at IS NULL) THEN
     INSERT INTO public.credits (user_id, balance)
-    VALUES (NEW.id, 5000)
+    VALUES (NEW.id, 3000)
     ON CONFLICT (user_id) DO NOTHING;
     INSERT INTO public.credit_transactions (user_id, amount, type, description)
-    VALUES (NEW.id, 5000, 'grant', '邮箱验证后赠送');
+    VALUES (NEW.id, 3000, 'grant', '邮箱验证后赠送');
     INSERT INTO public.user_settings (user_id, use_default_api)
     VALUES (NEW.id, true)
     ON CONFLICT (user_id) DO NOTHING;
   END IF;
   RETURN NEW;
 END;
- LANGUAGE plpgsql SECURITY DEFINER;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
 
 CREATE TRIGGER on_auth_email_confirmed
   AFTER UPDATE ON auth.users
   FOR EACH ROW
   EXECUTE FUNCTION public.handle_email_confirmed();
 
--- 匿名使用追踪表
+-- 匿名使用追踪表（已废弃，保留表结构以防报错）
 CREATE TABLE IF NOT EXISTS public.anonymous_usage (
   id uuid DEFAULT gen_random_uuid() PRIMARY KEY,
   fingerprint text NOT NULL,
   ip_address text DEFAULT '',
   message_count integer NOT NULL DEFAULT 1,
   created_at timestamptz DEFAULT now(),
-  updated_at timestamptz default now()
+  updated_at timestamptz DEFAULT now()
 );
 
 CREATE INDEX IF NOT EXISTS idx_anonymous_usage_fp ON public.anonymous_usage(fingerprint);

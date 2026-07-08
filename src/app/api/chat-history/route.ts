@@ -10,9 +10,16 @@ function getSupabase() {
 
 export async function GET(req: NextRequest) {
   var userId = req.nextUrl.searchParams.get('userId');
+  var historyId = req.nextUrl.searchParams.get('historyId');
   if (!userId) return NextResponse.json({ ok: false });
   var sb = getSupabase();
   if (!sb) return NextResponse.json({ ok: true, histories: [] });
+
+  if (historyId) {
+    var { data } = await sb.from('chat_history').select('id, agent_id, title, messages, created_at, updated_at').eq('id', historyId).eq('user_id', userId).single();
+    return NextResponse.json({ ok: true, history: data });
+  }
+
   var { data } = await sb.from('chat_history').select('id, agent_id, title, created_at, updated_at').eq('user_id', userId).order('updated_at', { ascending: false }).limit(50);
   return NextResponse.json({ ok: true, histories: data || [] });
 }

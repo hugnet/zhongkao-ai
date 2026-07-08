@@ -1,14 +1,11 @@
-﻿-- ========================================
--- 中考提分AI私教 - 积分系统SQL迁移
+﻿-- 中考提分AI私教 - 积分系统SQL迁移
 -- 只需执行一次！
--- 操作步骤见文末说明
--- ========================================
 
 -- 5. 积分表
 create table if not exists public.credits (
   id uuid default gen_random_uuid() primary key,
   user_id uuid references public.profiles(id) on delete cascade not null unique,
-  balance integer not null default 5000,
+  balance integer not null default 3000,
   total_used integer not null default 0,
   created_at timestamptz default now(),
   updated_at timestamptz default now()
@@ -52,19 +49,19 @@ create policy user_credit_tx_policy on public.credit_transactions
 create policy user_settings_policy on public.user_settings
   for all using (auth.uid() = user_id);
 
--- 新用户注册时自动赠送5000积分
+-- 新用户注册时自动赠送3000积分（邮箱验证后）
 create or replace function public.handle_new_user_credits()
-returns trigger as 
+returns trigger as $$
 begin
   insert into public.credits (user_id, balance)
-  values (new.id, 5000);
+  values (new.id, 3000);
   insert into public.credit_transactions (user_id, amount, type, description)
-  values (new.id, 5000, 'grant', '新用户注册赠送');
+  values (new.id, 3000, 'grant', '新用户注册赠送');
   insert into public.user_settings (user_id, use_default_api)
   values (new.id, true);
   return new;
 end;
- language plpgsql security definer;
+$$ language plpgsql security definer;
 
 drop trigger if exists on_auth_user_credits on auth.users;
 create trigger on_auth_user_credits

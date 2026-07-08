@@ -1,7 +1,4 @@
-﻿// 积分管理模块
-// 每次AI对话消耗10积分，5000积分可免费对话500次
-
-import { createClient } from "@supabase/supabase-js";
+﻿import { createClient } from "@supabase/supabase-js";
 
 const CREDITS_PER_MESSAGE = 10;
 const FREE_CREDITS = 3000;
@@ -17,54 +14,62 @@ function getSupabaseAdmin() {
 export async function getCredits(userId: string): Promise<number> {
   const sb = getSupabaseAdmin();
   if (!sb) return FREE_CREDITS;
-  const { data } = await sb.from("credits").select("balance").eq("user_id", userId).single();
-  return data?.balance ?? FREE_CREDITS;
+  try {
+    const { data } = await sb.from("credits").select("balance").eq("user_id", userId).single();
+    if (data?.balance !== undefined && data?.balance !== null) return data.balance;
+    await sb.from("credits").insert({ user_id: userId, balance: FREE_CREDITS });
+    return FREE_CREDITS;
+  } catch(e) {
+    return FREE_CREDITS;
+  }
 }
 
 export async function deductCredits(userId: string, amount: number, description: string): Promise<{ success: boolean; balance: number; error?: string }> {
   const sb = getSupabaseAdmin();
   if (!sb) return { success: true, balance: FREE_CREDITS };
 
-  const { data: credits } = await sb.from("credits").select("balance").eq("user_id", userId).single();
-  const currentBalance = credits?.balance ?? 0;
+  try {
+    const { data: credits } = await sb.from("credits").select("balance").eq("user_id", userId).single();
+    var currentBalance = credits?.balance;
+    if (currentBalance === undefined || currentBalance === null) {
+      await sb.from("credits").insert({ user_id: userId, balance: FREE_CREDITS - amount });
+      await sb.from("credit_transactions").insert({ user_id: userId, amount: -amount, type: "deduct", description: description });
+      return { success: true, balance: FREE_CREDITS - amount };
+    }
 
-  if (currentBalance < amount) {
-    return { success: false, balance: currentBalance, error: "积分不足" };
+    if (currentBalance < amount) {
+      return { success: false, balance: currentBalance, error: "积分不足" };
+    }
+
+    const newBalance = currentBalance - amount;
+    await sb.from("credits").update({ balance: newBalance, updated_at: new Date().toISOString() }).eq("user_id", userId);
+    await sb.from("credit_transactions").insert({ user_id: userId, amount: -amount, type: "deduct", description: description });
+    return { success: true, balance: newBalance };
+  } catch(e: any) {
+    console.error('[credits] deductCredits error:', e.message);
+    return { success: false, balance: 0, error: e.message };
   }
-
-  const newBalance = currentBalance - amount;
-  await sb.from("credits").update({ balance: newBalance, updated_at: new Date().toISOString() }).eq("user_id", userId);
-
-  await sb.from("credit_transactions").insert({
-    user_id: userId,
-    amount: -amount,
-    type: "deduct",
-    description,
-  });
-
-  return { success: true, balance: newBalance };
 }
 
 export async function grantCredits(userId: string, amount: number, description: string): Promise<void> {
   const sb = getSupabaseAdmin();
   if (!sb) return;
 
-  const { data: credits } = await sb.from("credits").select("balance").eq("user_id", userId).single();
-  const currentBalance = credits?.balance ?? 0;
-  const newBalance = currentBalance + amount;
+  try {
+    const { data: credits } = await sb.from("credits").select("balance").eq("user_id", userId).single();
+    const currentBalance = credits?.balance ?? 0;
+    const newBalance = currentBalance + amount;
 
-  if (credits) {
-    await sb.from("credits").update({ balance: newBalance, updated_at: new Date().toISOString() }).eq("user_id", userId);
-  } else {
-    await sb.from("credits").insert({ user_id: userId, balance: newBalance });
+    if (credits) {
+      await sb.from("credits").update({ balance: newBalance, updated_at: new Date().toISOString() }).eq("user_id", userId);
+    } else {
+      await sb.from("credits").insert({ user_id: userId, balance: newBalance });
+    }
+
+    await sb.from("credit_transactions").insert({ user_id: userId, amount, type: "grant", description });
+  } catch(e: any) {
+    console.error('[credits] grantCredits error:', e.message);
   }
-
-  await sb.from("credit_transactions").insert({
-    user_id: userId,
-    amount,
-    type: "grant",
-    description,
-  });
 }
 
 export async function getCreditTransactions(userId: string, limit = 20): Promise<{ amount: number; type: string; description: string; created_at: string }[]> {
@@ -79,4 +84,3 @@ export function isLowCredits(balance: number): boolean {
 }
 
 export { CREDITS_PER_MESSAGE, FREE_CREDITS, LOW_CREDIT_THRESHOLD };
-

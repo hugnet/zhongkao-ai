@@ -1,5 +1,4 @@
 ﻿let _sb: any = null;
-
 function getClient() {
   if (_sb) return _sb;
   var url = process.env.NEXT_PUBLIC_SUPABASE_URL || "";
@@ -33,4 +32,9 @@ export async function signUp(email: string, password: string) {
 export async function signOut() {
   var sb = getSupabase(); if (!sb) throw new Error("Supabase not configured");
   await sb.auth.signOut();
+  localStorage.removeItem('zhongkao_user_id');
+  localStorage.removeItem('zhongkao_user_email');
+  localStorage.removeItem('zhongkao_custom_api_key');
+  localStorage.removeItem('zhongkao_custom_provider');
+  localStorage.removeItem('zhongkao_custom_provider_config');
 }

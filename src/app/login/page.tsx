@@ -1,38 +1,51 @@
-'use client';
-
-'use client';
+﻿'use client';
 
 import { useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
-import { signInWithEmail, signUp } from '@/lib/supabase/client';
+import { signInWithEmail, signUp, getSupabase } from '@/lib/supabase/client';
 
 export default function LoginPage() {
   var [email, setEmail] = useState('');
   var [password, setPassword] = useState('');
   var [isSignUp, setIsSignUp] = useState(false);
   var [message, setMessage] = useState('');
+  var [loading, setLoading] = useState(false);
 
   async function handleSubmit(e: any) {
     e.preventDefault();
     setMessage('');
+    setLoading(true);
     try {
       var result = isSignUp ? await signUp(email, password) : await signInWithEmail(email, password);
       if (result.error) {
         setMessage(result.error.message);
       } else {
-        setMessage(isSignUp ? "注册成功！请检查邮箱确认。" : "登录成功！");
+        var sb = getSupabase();
+        if (sb) {
+          var { data: sessionData } = await sb.auth.getSession();
+          var user = sessionData?.session?.user;
+          if (user) {
+            localStorage.setItem('zhongkao_user_id', user.id);
+            localStorage.setItem('zhongkao_user_email', user.email || '');
+          }
+        }
+        setMessage(isSignUp ? '注册成功！请查看邮箱确认' : '登录成功！正在跳转...');
+        if (!isSignUp) {
+          setTimeout(function() { window.location.href = '/chat'; }, 500);
+        }
       }
     } catch (err: any) {
       setMessage('操作失败：' + err.message);
     }
+    setLoading(false);
   }
 
   return (
     <div className="max-w-md mx-auto px-4 py-20">
       <Card>
         <CardHeader>
-          <CardTitle>{isSignUp ? "注册" : "登录"}</CardTitle>
+          <CardTitle>{isSignUp ? '注册' : '登录'}</CardTitle>
         </CardHeader>
         <CardContent>
           <form onSubmit={handleSubmit} className="space-y-4">
@@ -57,11 +70,13 @@ export default function LoginPage() {
               />
             </div>
             {message ? <p className="text-sm text-blue-600">{message}</p> : null}
-            <Button variant="primary" className="w-full" type="submit">{isSignUp ? "注册" : "登录"}</Button>
+            <Button variant="primary" className="w-full" type="submit" disabled={loading}>
+              {loading ? '处理中...' : (isSignUp ? '注册' : '登录')}
+            </Button>
           </form>
           <div className="mt-4 text-center">
             <button onClick={function() { setIsSignUp(!isSignUp); }} className="text-sm text-blue-600 hover:underline">
-              {isSignUp ? "已有账号？登录" : "没有账号？注册"}
+              {isSignUp ? '已有账号？登录' : '没有账号？注册'}
             </button>
           </div>
         </CardContent>

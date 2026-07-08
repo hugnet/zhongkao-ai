@@ -8,21 +8,12 @@ import { CreditBalance } from '@/components/credits/CreditBalance';
 import { CreditRechargeModal } from '@/components/credits/CreditRechargeModal';
 
 interface ChatMsg { id: string; role: 'user' | 'assistant'; content: string; agentId?: string; }
-interface HistoryItem { id: string; agent_id: string; title: string; messages?: ChatMsg[]; updated_at?: string; }
-
-var CREDITS_PER_MSG = 10;
+interface HistoryItem { id: string; agent_id: string; title: string; messages?: ChatMsg[]; updated_at?: string; serverId?: string; }
 
 function isLoggedIn(): boolean {
   if (typeof window === 'undefined') return false;
-  return (localStorage.getItem('zhongkao_user_id') || '').indexOf('anon_') !== 0;
-}
-
-function loadLocalHistory(): HistoryItem[] {
-  if (typeof window === 'undefined') return [];
-  try { return JSON.parse(localStorage.getItem('zhongkao_chat_history') || '[]'); } catch(e) { return []; }
-}
-function saveLocalHistory(items: HistoryItem[]) {
-  localStorage.setItem('zhongkao_chat_history', JSON.stringify(items));
+  var uid = localStorage.getItem('zhongkao_user_id') || '';
+  return uid.length > 0 && uid.indexOf('anon_') !== 0;
 }
 
 export default function ChatPage() {
@@ -33,7 +24,6 @@ export default function ChatPage() {
   var [userId, setUserId] = useState<string | null>(null);
   var [showRecharge, setShowRecharge] = useState(false);
   var [lowBalance, setLowBalance] = useState(0);
-  var [showLoginPrompt, setShowLoginPrompt] = useState(false);
   var [loggedIn, setLoggedIn] = useState(false);
   var [histories, setHistories] = useState<HistoryItem[]>([]);
   var [currentHistoryId, setCurrentHistoryId] = useState<string | null>(null);
@@ -47,32 +37,79 @@ export default function ChatPage() {
     if (hasAcc) {
       var uid = localStorage.getItem('zhongkao_user_id');
       setUserId(uid);
+      loadServerHistories(uid!);
     }
-    setHistories(loadLocalHistory());
   }, []);
+
+  async function loadServerHistories(uid: string) {
+    try {
+      var res = await fetch('/api/chat-history?userId=' + uid);
+      var data = await res.json();
+      if (data.ok && data.histories) {
+        var items: HistoryItem[] = data.histories.map(function(h: any) {
+          return { id: 'server_' + h.id, serverId: h.id, agent_id: h.agent_id, title: h.title, updated_at: h.updated_at, messages: undefined };
+        });
+        setHistories(items);
+      }
+    } catch(e) {}
+  }
+
+  async function loadHistoryMessages(h: HistoryItem) {
+    if (h.messages) {
+      setMessages(h.messages);
+      setCurrentHistoryId(h.id);
+      return;
+    }
+    if (h.serverId && userId) {
+      try {
+        var res = await fetch('/api/chat-history?userId=' + userId + '&historyId=' + h.serverId);
+        var data = await res.json();
+        if (data.ok && data.history) {
+          var msgs: ChatMsg[] = (data.history.messages || []).map(function(m: any, i: number) {
+            return { id: 'msg_' + i, role: m.role, content: m.content, agentId: h.agent_id };
+          });
+          setMessages(msgs);
+          setCurrentHistoryId(h.id);
+          setHistories(function(prev) {
+            return prev.map(function(item) { return item.id === h.id ? { ...item, messages: msgs } : item; });
+          });
+        }
+      } catch(e) {}
+    }
+  }
+
+  async function saveHistory(msgs: ChatMsg[], agentId: string) {
+    var title = (msgs.find(function(m) { return m.role === 'user'; })?.content || '新对话').slice(0, 30);
+
+    if (userId) {
+      try {
+        var payload: any = { userId: userId, agentId: agentId, title: title, messages: msgs.map(function(m) { return { role: m.role, content: m.content }; }) };
+        if (currentHistoryId && currentHistoryId.startsWith('server_')) {
+          payload.historyId = currentHistoryId.replace('server_', '');
+        }
+        var res = await fetch('/api/chat-history', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+        var data = await res.json();
+        if (data.ok && data.id && !currentHistoryId) {
+          var newId = 'server_' + data.id;
+          setCurrentHistoryId(newId);
+          setHistories(function(prev) {
+            var newItem: HistoryItem = { id: newId, serverId: data.id, agent_id: agentId, title: title, messages: msgs, updated_at: new Date().toISOString() };
+            return [newItem].concat(prev.filter(function(h) { return h.id !== newId; }));
+          });
+          return;
+        }
+        if (data.ok) {
+          setHistories(function(prev) {
+            return prev.map(function(h) { return h.id === currentHistoryId ? { ...h, title: title, messages: msgs, updated_at: new Date().toISOString() } : h; });
+          });
+        }
+      } catch(e) {}
+    }
+  }
 
   function startNewChat() {
     setMessages([]);
     setCurrentHistoryId(null);
-  }
-
-  function loadLocalChat(h: HistoryItem) {
-    if (h.messages) { setMessages(h.messages); setCurrentHistoryId(h.id); }
-  }
-
-  function saveLocalChat(msgs: ChatMsg[], agentId: string) {
-    var hist = loadLocalHistory();
-    var title = (msgs[0]?.content || '新对话').slice(0, 30);
-    if (currentHistoryId) {
-      hist = hist.map(function(h) { return h.id === currentHistoryId ? { ...h, title: title, messages: msgs, updated_at: new Date().toISOString() } : h; });
-    } else {
-      var newItem: HistoryItem = { id: 'local_' + generateId(), agent_id: agentId, title: title, messages: msgs, updated_at: new Date().toISOString() };
-      hist.unshift(newItem);
-      setCurrentHistoryId(newItem.id);
-    }
-    if (hist.length > 50) hist = hist.slice(0, 50);
-    saveLocalHistory(hist);
-    setHistories(hist);
   }
 
   var agent = AGENTS.find(function(a) { return a.id === currentAgent; });
@@ -81,7 +118,10 @@ export default function ChatPage() {
   async function handleSend() {
     if (!input.trim() || loading) return;
 
-    if (!loggedIn) { setShowLoginPrompt(true); return; }
+    if (!loggedIn) {
+      window.location.href = '/login';
+      return;
+    }
 
     var userMsg: ChatMsg = { id: generateId(), role: 'user', content: input, agentId: currentAgent };
     var newMsgs = messages.concat(userMsg);
@@ -91,89 +131,65 @@ export default function ChatPage() {
 
     try {
       var localKey = localStorage.getItem('zhongkao_custom_api_key') || '';
-      var localProvider = localStorage.getItem('zhongkao_custom_provider') || 'deepseek';
+      var localProvider = localStorage.getItem('zhongkao_custom_provider') || '';
 
-      if (localKey) {
-        var res = await fetch('/api/chat', { method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ messages: newMsgs.map(function(m) { return { role: m.role, content: m.content }; }).slice(-20), agentId: currentAgent, apiKey: localKey, providerId: localProvider }) });
-        var data = await res.json();
-        var reply = data.error ? '出错了，请稍后重试。' : data.content;
-        var allMsgs = newMsgs.concat([{ id: generateId(), role: 'assistant', content: reply, agentId: currentAgent }]);
-        setMessages(allMsgs);
-        saveLocalChat(allMsgs, currentAgent);
-      } else {
-        var defaultRes = await fetch('/api/chat/default', { method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ messages: newMsgs.map(function(m) { return { role: m.role, content: m.content }; }).slice(-20), agentId: currentAgent, userId: userId }) });
-        var defaultData = await defaultRes.json();
-        if (defaultData.error === 'INSUFFICIENT_CREDITS') {
-          setLowBalance(defaultData.credits || 0);
-          setShowRecharge(true);
-          setMessages(messages);
-        } else if (defaultData.error) {
-          setMessages(newMsgs.concat([{ id: generateId(), role: 'assistant', content: '服务暂时不可用，请稍后重试。', agentId: currentAgent }]));
-        } else {
-          var assistantMsg = { id: generateId(), role: 'assistant' as const, content: defaultData.content, agentId: currentAgent };
-          var allMsgs2 = newMsgs.concat([assistantMsg]);
-          setMessages(allMsgs2);
-          saveLocalChat(allMsgs2, currentAgent);
-        }
+      var apiUrl = '/api/chat/default';
+      var payload: any = { messages: newMsgs.map(function(m) { return { role: m.role, content: m.content }; }).slice(-20), agentId: currentAgent, userId: userId };
+
+      if (localKey && localProvider) {
+        apiUrl = '/api/chat';
+        payload = { ...payload, apiKey: localKey, providerId: localProvider };
+        delete payload.userId;
       }
-    } catch (err: any) {
-      setMessages(newMsgs.concat([{ id: generateId(), role: 'assistant', content: '服务暂时不可用，请稍后再试。', agentId: currentAgent }]));
+
+      var res = await fetch(apiUrl, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+      var data = await res.json();
+
+      if (data.error === 'INSUFFICIENT_CREDITS') {
+        setLowBalance(data.credits || 0);
+        setShowRecharge(true);
+        setLoading(false);
+        setMessages(messages);
+        return;
+      }
+
+      var reply = data.error ? ('请求出错：' + (data.error || '请稍后重试')) : (data.content || '抱歉，暂时无法回答。');
+      var allMsgs = newMsgs.concat([{ id: generateId(), role: 'assistant', content: reply, agentId: currentAgent }]);
+      setMessages(allMsgs);
+      await saveHistory(allMsgs, currentAgent);
+    } catch(e: any) {
+      var errorMsg = '网络错误，请检查网络连接后重试。';
+      if (e.message) errorMsg = '请求失败：' + e.message;
+      var allMsgs = newMsgs.concat([{ id: generateId(), role: 'assistant', content: errorMsg, agentId: currentAgent }]);
+      setMessages(allMsgs);
     }
     setLoading(false);
   }
 
-  if (!loggedIn) {
-    return (
-      <div className="max-w-md mx-auto px-4 py-32 text-center">
-        <div className="text-5xl mb-4">&#127919;</div>
-        <h1 className="text-2xl font-bold text-gray-900 mb-3">登录后开始AI对话</h1>
-        <p className="text-gray-500 mb-6">注册即送3000积分，可对话300次</p>
-        <div className="space-y-3">
-          <a href="/login" className="block w-full bg-blue-600 text-white py-3 rounded-lg font-medium hover:bg-blue-700 transition-colors">登录 / 注册</a>
-          <a href="/" className="block text-gray-400 text-sm hover:text-gray-600">返回首页</a>
-        </div>
-      </div>
-    );
-  }
-
   return (
-    <div className="max-w-6xl mx-auto px-4 py-6 flex gap-6 h-[calc(100vh-5rem)]">
-      <CreditRechargeModal open={showRecharge} balance={lowBalance} onClose={function() { setShowRecharge(false); }} />
+    <div className="flex h-[calc(100vh-4rem)]">
+      <div className="w-64 border-r border-gray-200 bg-white p-4 flex flex-col shrink-0">
+        <Button variant="primary" className="w-full mb-4" onClick={startNewChat}>+ 新对话</Button>
 
-      {showLoginPrompt ? (
-        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" onClick={function() { setShowLoginPrompt(false); }}>
-          <div className="bg-white rounded-2xl max-w-sm w-full p-6 shadow-2xl" onClick={function(e) { e.stopPropagation(); }}>
-            <div className="text-center">
-              <div className="text-4xl mb-3">&#127919;</div>
-              <h3 className="text-lg font-bold text-gray-900 mb-2">请先登录</h3>
-              <a href="/login" className="block w-full bg-blue-600 text-white py-2.5 rounded-lg text-sm font-medium hover:bg-blue-700">登录 / 注册</a>
-              <button onClick={function() { setShowLoginPrompt(false); }} className="block w-full text-gray-400 text-sm py-2 mt-1">取消</button>
-            </div>
-          </div>
+        <div className="space-y-1 mb-2">
+          {SUBJECTS.map(function(sub) {
+            return (
+              <button key={sub.id} onClick={function() { setCurrentAgent(sub.agentId); startNewChat(); }}
+                className={"w-full text-left px-3 py-2 rounded-lg text-sm transition-colors flex items-center gap-2 " + (currentAgent === sub.agentId ? "bg-blue-50 text-blue-700 font-medium" : "text-gray-600 hover:bg-gray-50")}>
+                <span>{sub.icon}</span>
+                <span>{sub.label}</span>
+              </button>
+            );
+          })}
         </div>
-      ) : null}
-
-      <div className="w-52 shrink-0 space-y-2 overflow-y-auto">
-        <button onClick={startNewChat} className="w-full flex items-center gap-2 px-3 py-2 rounded-lg text-sm bg-blue-50 text-blue-600 hover:bg-blue-100 transition-colors font-medium">+ 新对话</button>
-        <h3 className="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-3">选择学科</h3>
-        {SUBJECTS.map(function(sub) {
-          return (
-            <button key={sub.id} onClick={function() { setCurrentAgent(sub.agentId); }}
-              className={"w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm transition-all text-left " + (currentAgent === sub.agentId ? "bg-blue-50 text-blue-700 font-medium shadow-sm" : "text-gray-600 hover:bg-gray-100")}>
-              <span className="text-xl">{sub.icon}</span><span>{sub.label}</span>
-            </button>
-          );
-        })}
 
         {histories.length > 0 ? (
-          <div className="mt-4 pt-4 border-t border-gray-200">
+          <div className="mt-4 pt-4 border-t border-gray-200 flex-1 overflow-hidden flex flex-col">
             <h3 className="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-2">历史对话</h3>
-            <div className="space-y-1 max-h-48 overflow-y-auto">
-              {histories.slice(0, 20).map(function(h) {
+            <div className="space-y-1 overflow-y-auto flex-1">
+              {histories.slice(0, 30).map(function(h) {
                 return (
-                  <button key={h.id} onClick={function() { if (h.messages) loadLocalChat(h); }}
+                  <button key={h.id} onClick={function() { loadHistoryMessages(h); }}
                     className={"w-full text-left px-2 py-1.5 rounded text-xs truncate transition-colors " + (currentHistoryId === h.id ? "bg-blue-50 text-blue-700" : "text-gray-500 hover:bg-gray-50")}>
                     {h.title}
                   </button>
@@ -190,7 +206,7 @@ export default function ChatPage() {
       </div>
 
       <div className="flex-1 flex flex-col">
-        <div className="flex items-center gap-3 mb-4 pb-4 border-b border-gray-200">
+        <div className="flex items-center gap-3 mb-4 pb-4 border-b border-gray-200 px-6">
           <span className="text-3xl">{subject?.icon}</span>
           <div className="flex-1">
             <h2 className="font-bold text-gray-900">{agent?.name} · {agent?.title}</h2>
@@ -198,7 +214,7 @@ export default function ChatPage() {
           </div>
         </div>
 
-        <div className="flex-1 overflow-y-auto chat-messages space-y-4 pr-2">
+        <div className="flex-1 overflow-y-auto chat-messages space-y-4 pr-6 pl-6">
           {messages.length === 0 ? (
             <div className="text-center py-16">
               <span className="text-5xl block mb-4">{subject?.icon}</span>
@@ -234,19 +250,26 @@ export default function ChatPage() {
           <div ref={messagesEndRef} />
         </div>
 
-        <div className="mt-4 pt-4 border-t border-gray-200">
+        <div className="mt-4 pt-4 border-t border-gray-200 px-6 pb-4">
           <div className="flex gap-3">
             <input value={input} onChange={function(e) { setInput(e.target.value); }}
               onKeyDown={function(e) { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(); } }}
-              placeholder={"向" + (agent?.name || "老师") + "提问..."}
+              placeholder={loggedIn ? ("向" + (agent?.name || "老师") + "提问...") : "请先登录后使用AI对话"}
               className="flex-1 px-4 py-2.5 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
               disabled={loading} />
             <Button variant="primary" onClick={handleSend} disabled={loading || !input.trim()}>
               {loading ? "思考中..." : "发送"}
             </Button>
           </div>
+          {!loggedIn ? (
+            <p className="text-xs text-gray-400 mt-2 text-center">
+              <a href="/login" className="text-blue-500 hover:underline">登录</a> 后即可开始AI对话，注册赠送3000积分
+            </p>
+          ) : null}
         </div>
       </div>
+
+      <CreditRechargeModal open={showRecharge} balance={lowBalance} onClose={function() { setShowRecharge(false); }} />
     </div>
   );
 }
