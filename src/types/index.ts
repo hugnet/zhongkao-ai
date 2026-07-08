@@ -1,4 +1,4 @@
-export interface Agent {
+﻿export interface Agent {
   id: string;
   name: string;
   title: string;
@@ -22,7 +22,7 @@ export interface Skill {
 
 export interface Message {
   id: string;
-  role: 'user' | 'assistant' | 'system';
+  role: "user" | "assistant" | "system";
   content: string;
   agentId?: string;
   createdAt: string;
@@ -32,6 +32,23 @@ export interface UserProfile {
   id: string;
   email: string;
   name?: string;
-  subscription?: 'free' | 'monthly' | 'yearly';
+  subscription?: "free" | "monthly" | "yearly";
+  credits: number;
   createdAt: string;
+}
+
+export interface CreditTransaction {
+  id: string;
+  userId: string;
+  amount: number;
+  type: "grant" | "deduct" | "purchase" | "subscription";
+  description: string;
+  createdAt: string;
+}
+
+export interface UserSettings {
+  userId: string;
+  customApiKey?: string;
+  customProviderId?: string;
+  useDefaultApi: boolean;
 }
