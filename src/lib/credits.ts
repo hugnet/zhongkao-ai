@@ -4,7 +4,7 @@
 import { createClient } from "@supabase/supabase-js";
 
 const CREDITS_PER_MESSAGE = 10;
-const FREE_CREDITS = 5000;
+const FREE_CREDITS = 3000;
 const LOW_CREDIT_THRESHOLD = 100;
 
 function getSupabaseAdmin() {
@@ -79,3 +79,4 @@ export function isLowCredits(balance: number): boolean {
 }
 
 export { CREDITS_PER_MESSAGE, FREE_CREDITS, LOW_CREDIT_THRESHOLD };
+

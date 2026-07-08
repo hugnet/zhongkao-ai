@@ -10,17 +10,7 @@ import { CreditRechargeModal } from '@/components/credits/CreditRechargeModal';
 interface ChatMsg { id: string; role: 'user' | 'assistant'; content: string; agentId?: string; }
 interface HistoryItem { id: string; agent_id: string; title: string; messages?: ChatMsg[]; updated_at?: string; }
 
-var FREE_LIMIT = 10;
-
-function getDeviceId(): string {
-  if (typeof window === 'undefined') return '';
-  var saved = localStorage.getItem('zhongkao_device_id');
-  if (saved) return saved;
-  var id = 'dev_' + crypto.randomUUID();
-  localStorage.setItem('zhongkao_device_id', id);
-  document.cookie = 'zhongkao_did=' + id + ';path=/;max-age=31536000;samesite=lax';
-  return id;
-}
+var CREDITS_PER_MSG = 10;
 
 function isLoggedIn(): boolean {
   if (typeof window === 'undefined') return false;
@@ -43,9 +33,7 @@ export default function ChatPage() {
   var [userId, setUserId] = useState<string | null>(null);
   var [showRecharge, setShowRecharge] = useState(false);
   var [lowBalance, setLowBalance] = useState(0);
-  var [freeRemaining, setFreeRemaining] = useState(FREE_LIMIT);
   var [showLoginPrompt, setShowLoginPrompt] = useState(false);
-  var [deviceId, setDeviceId] = useState('');
   var [loggedIn, setLoggedIn] = useState(false);
   var [histories, setHistories] = useState<HistoryItem[]>([]);
   var [currentHistoryId, setCurrentHistoryId] = useState<string | null>(null);
@@ -54,23 +42,13 @@ export default function ChatPage() {
   useEffect(function() { messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [messages]);
 
   useEffect(function() {
-    var stored = localStorage.getItem('zhongkao_user_id');
     var hasAcc = isLoggedIn();
-    if (!stored) { stored = 'anon_' + generateId(); localStorage.setItem('zhongkao_user_id', stored); }
-    setUserId(stored);
     setLoggedIn(hasAcc);
-
-    var did = getDeviceId();
-    setDeviceId(did);
-
-    if (!hasAcc) {
-      fetch('/api/anonymous-usage', { method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ deviceId: did, action: 'check' }) })
-        .then(function(r) { return r.json(); })
-        .then(function(d) { if (d.ok) setFreeRemaining(d.remaining); })
-        .catch(function() {});
-      setHistories(loadLocalHistory());
+    if (hasAcc) {
+      var uid = localStorage.getItem('zhongkao_user_id');
+      setUserId(uid);
     }
+    setHistories(loadLocalHistory());
   }, []);
 
   function startNewChat() {
@@ -102,7 +80,8 @@ export default function ChatPage() {
 
   async function handleSend() {
     if (!input.trim() || loading) return;
-    if (!loggedIn && freeRemaining <= 0) { setShowLoginPrompt(true); return; }
+
+    if (!loggedIn) { setShowLoginPrompt(true); return; }
 
     var userMsg: ChatMsg = { id: generateId(), role: 'user', content: input, agentId: currentAgent };
     var newMsgs = messages.concat(userMsg);
@@ -121,43 +100,56 @@ export default function ChatPage() {
         var reply = data.error ? '出错了，请稍后重试。' : data.content;
         var allMsgs = newMsgs.concat([{ id: generateId(), role: 'assistant', content: reply, agentId: currentAgent }]);
         setMessages(allMsgs);
-        if (loggedIn) { /* save to supabase */ } else { saveLocalChat(allMsgs, currentAgent); }
+        saveLocalChat(allMsgs, currentAgent);
       } else {
         var defaultRes = await fetch('/api/chat/default', { method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ messages: newMsgs.map(function(m) { return { role: m.role, content: m.content }; }).slice(-20), agentId: currentAgent, userId: loggedIn ? userId : null, deviceId: loggedIn ? null : deviceId }) });
+          body: JSON.stringify({ messages: newMsgs.map(function(m) { return { role: m.role, content: m.content }; }).slice(-20), agentId: currentAgent, userId: userId }) });
         var defaultData = await defaultRes.json();
-        if (defaultData.error === 'ANON_LIMIT_EXCEEDED') { setFreeRemaining(0); setShowLoginPrompt(true); setMessages(messages); }
-        else if (defaultData.error === 'INSUFFICIENT_CREDITS') { setLowBalance(defaultData.credits || 0); setShowRecharge(true); }
-        else if (defaultData.error) { setMessages(newMsgs.concat([{ id: generateId(), role: 'assistant', content: '服务暂时不可用。', agentId: currentAgent }])); }
-        else {
+        if (defaultData.error === 'INSUFFICIENT_CREDITS') {
+          setLowBalance(defaultData.credits || 0);
+          setShowRecharge(true);
+          setMessages(messages);
+        } else if (defaultData.error) {
+          setMessages(newMsgs.concat([{ id: generateId(), role: 'assistant', content: '服务暂时不可用，请稍后重试。', agentId: currentAgent }]));
+        } else {
           var assistantMsg = { id: generateId(), role: 'assistant' as const, content: defaultData.content, agentId: currentAgent };
           var allMsgs2 = newMsgs.concat([assistantMsg]);
           setMessages(allMsgs2);
-          if (!loggedIn) {
-            var newRem = typeof defaultData.remaining === 'number' ? defaultData.remaining : Math.max(0, freeRemaining - 1);
-            setFreeRemaining(newRem);
-            saveLocalChat(allMsgs2, currentAgent);
-          }
+          saveLocalChat(allMsgs2, currentAgent);
         }
       }
     } catch (err: any) {
-      setMessages(newMsgs.concat([{ id: generateId(), role: 'assistant', content: '服务暂时不可用。', agentId: currentAgent }]));
+      setMessages(newMsgs.concat([{ id: generateId(), role: 'assistant', content: '服务暂时不可用，请稍后再试。', agentId: currentAgent }]));
     }
     setLoading(false);
   }
 
+  if (!loggedIn) {
+    return (
+      <div className="max-w-md mx-auto px-4 py-32 text-center">
+        <div className="text-5xl mb-4">&#127919;</div>
+        <h1 className="text-2xl font-bold text-gray-900 mb-3">登录后开始AI对话</h1>
+        <p className="text-gray-500 mb-6">注册即送3000积分，可对话300次</p>
+        <div className="space-y-3">
+          <a href="/login" className="block w-full bg-blue-600 text-white py-3 rounded-lg font-medium hover:bg-blue-700 transition-colors">登录 / 注册</a>
+          <a href="/" className="block text-gray-400 text-sm hover:text-gray-600">返回首页</a>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="max-w-6xl mx-auto px-4 py-6 flex gap-6 h-[calc(100vh-5rem)]">
-      <CreditRechargeModal open={showRecharge} balance={0} onClose={function() { setShowRecharge(false); }} />
+      <CreditRechargeModal open={showRecharge} balance={lowBalance} onClose={function() { setShowRecharge(false); }} />
+
       {showLoginPrompt ? (
         <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" onClick={function() { setShowLoginPrompt(false); }}>
           <div className="bg-white rounded-2xl max-w-sm w-full p-6 shadow-2xl" onClick={function(e) { e.stopPropagation(); }}>
             <div className="text-center">
               <div className="text-4xl mb-3">&#127919;</div>
-              <h3 className="text-lg font-bold text-gray-900 mb-2">免费体验已用完</h3>
-              <p className="text-sm text-gray-500 mb-4">注册登录后赠送5000积分</p>
+              <h3 className="text-lg font-bold text-gray-900 mb-2">请先登录</h3>
               <a href="/login" className="block w-full bg-blue-600 text-white py-2.5 rounded-lg text-sm font-medium hover:bg-blue-700">登录 / 注册</a>
-              <button onClick={function() { setShowLoginPrompt(false); }} className="block w-full text-gray-400 text-sm py-2 mt-1">稍后再说</button>
+              <button onClick={function() { setShowLoginPrompt(false); }} className="block w-full text-gray-400 text-sm py-2 mt-1">取消</button>
             </div>
           </div>
         </div>
@@ -192,14 +184,7 @@ export default function ChatPage() {
         ) : null}
 
         <div className="mt-4 pt-4 border-t border-gray-200 space-y-2">
-          {loggedIn ? (
-            <CreditBalance userId={userId} onLowCredits={function(b) { setLowBalance(b); setShowRecharge(true); }} />
-          ) : (
-            <div className={"text-xs rounded-lg p-2 " + (freeRemaining <= 3 ? "text-red-600 bg-red-50 border border-red-200" : "text-gray-500 bg-yellow-50 border border-yellow-200")}>
-              <span className="font-bold">{freeRemaining}</span> 次免费剩余
-              <a href="/login" className="block text-blue-600 mt-1 hover:underline">登录获取5000积分 →</a>
-            </div>
-          )}
+          <CreditBalance userId={userId} onLowCredits={function(b) { setLowBalance(b); setShowRecharge(true); }} />
           <a href="/settings" className="block text-xs text-gray-400 hover:text-blue-600">&#9881; 设置</a>
         </div>
       </div>
@@ -211,7 +196,6 @@ export default function ChatPage() {
             <h2 className="font-bold text-gray-900">{agent?.name} · {agent?.title}</h2>
             <p className="text-sm text-gray-500">{agent?.description.slice(0, 60)}..</p>
           </div>
-          <span className="text-[10px] bg-gray-100 text-gray-400 px-2 py-1 rounded-full">{loggedIn ? '已登录' : freeRemaining + '次免费'}</span>
         </div>
 
         <div className="flex-1 overflow-y-auto chat-messages space-y-4 pr-2">
@@ -219,7 +203,7 @@ export default function ChatPage() {
             <div className="text-center py-16">
               <span className="text-5xl block mb-4">{subject?.icon}</span>
               <h3 className="text-lg font-semibold text-gray-900 mb-2">向 {agent?.name} 提问</h3>
-              <p className="text-sm text-gray-500 max-w-md mx-auto">{loggedIn ? '使用积分开始对话' : '每台设备限10次免费'}</p>
+              <p className="text-sm text-gray-500 max-w-md mx-auto">每次对话消耗10积分</p>
               <div className="flex flex-wrap justify-center gap-2 mt-6">
                 {(agent?.skills || []).slice(0, 6).map(function(s) {
                   return <button key={s.id} onClick={function() { setInput("老师，我有个" + s.name + "的问题：" + s.triggers[0]); }} className="text-xs bg-gray-100 text-gray-600 px-3 py-1.5 rounded-full hover:bg-gray-200">{s.name}</button>;
@@ -254,10 +238,10 @@ export default function ChatPage() {
           <div className="flex gap-3">
             <input value={input} onChange={function(e) { setInput(e.target.value); }}
               onKeyDown={function(e) { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(); } }}
-              placeholder={loggedIn || freeRemaining > 0 ? "向" + (agent?.name || "老师") + "提问..." : "登录后继续提问"}
+              placeholder={"向" + (agent?.name || "老师") + "提问..."}
               className="flex-1 px-4 py-2.5 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
-              disabled={loading || (!loggedIn && freeRemaining <= 0)} />
-            <Button variant="primary" onClick={handleSend} disabled={loading || !input.trim() || (!loggedIn && freeRemaining <= 0)}>
+              disabled={loading} />
+            <Button variant="primary" onClick={handleSend} disabled={loading || !input.trim()}>
               {loading ? "思考中..." : "发送"}
             </Button>
           </div>
