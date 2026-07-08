@@ -134,3 +134,11 @@ dist
 .yarn/build-state.yml
 .yarn/install-state.gz
 .pnp.*
+  
+# temp files  
+gen-test.mjs  
+test-backtick.mjs  
+test-json.txt  
+write-all.js  
+src/test.txt  
+zhongkao-ai/ 
