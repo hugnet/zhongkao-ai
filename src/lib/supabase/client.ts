@@ -1,4 +1,4 @@
-let _sb: any = null;
+﻿let _sb: any = null;
 
 function getClient() {
   if (_sb) return _sb;
@@ -13,8 +13,6 @@ function getClient() {
 }
 
 export function getSupabase() { return getClient(); }
-export { signInWithEmail, signUp, signOut };
-import { getSupabase } from "@/lib/supabase/client";
 
 export async function getCurrentUser() {
   var sb = getSupabase(); if (!sb) return null;
@@ -23,16 +21,16 @@ export async function getCurrentUser() {
 }
 
 export async function signInWithEmail(email: string, password: string) {
-  var sb = getSupabase(); if (!sb) throw new Error('Supabase not configured');
+  var sb = getSupabase(); if (!sb) throw new Error("Supabase not configured");
   return sb.auth.signInWithPassword({ email, password });
 }
 
 export async function signUp(email: string, password: string) {
-  var sb = getSupabase(); if (!sb) throw new Error('Supabase not configured');
+  var sb = getSupabase(); if (!sb) throw new Error("Supabase not configured");
   return sb.auth.signUp({ email, password });
 }
 
 export async function signOut() {
-  var sb = getSupabase(); if (!sb) throw new Error('Supabase not configured');
+  var sb = getSupabase(); if (!sb) throw new Error("Supabase not configured");
   await sb.auth.signOut();
 }
