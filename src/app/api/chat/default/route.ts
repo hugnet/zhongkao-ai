@@ -18,33 +18,33 @@ function getSupabase() {
   return createClient(url, key);
 }
 
-async function checkAnonymousLimit(fingerprint: string): Promise<{ allowed: boolean; remaining: number }> {
-  if (!fingerprint) return { allowed: true, remaining: ANON_LIMIT };
+async function checkAnonymousLimit(deviceId: string): Promise<{ allowed: boolean; remaining: number }> {
+  if (!deviceId) return { allowed: true, remaining: ANON_LIMIT };
   var sb = getSupabase();
   if (!sb) return { allowed: true, remaining: ANON_LIMIT };
 
-  var { data } = await sb.from('anonymous_usage').select('id, message_count').eq('fingerprint', fingerprint).single();
+  var { data } = await sb.from('anonymous_usage').select('id, message_count').eq('deviceId', deviceId).single();
   var count = data ? data.message_count : 0;
   return { allowed: count < ANON_LIMIT, remaining: Math.max(0, ANON_LIMIT - count) };
 }
 
-async function incrementAnonymousUsage(fingerprint: string): Promise<void> {
-  if (!fingerprint) return;
+async function incrementAnonymousUsage(deviceId: string): Promise<void> {
+  if (!deviceId) return;
   var sb = getSupabase();
   if (!sb) return;
 
-  var { data: existing } = await sb.from('anonymous_usage').select('id, message_count').eq('fingerprint', fingerprint).single();
+  var { data: existing } = await sb.from('anonymous_usage').select('id, message_count').eq('deviceId', deviceId).single();
   if (existing) {
     await sb.from('anonymous_usage').update({ message_count: existing.message_count + 1, updated_at: new Date().toISOString() }).eq('id', existing.id);
   } else {
-    await sb.from('anonymous_usage').insert({ fingerprint: fingerprint, message_count: 1 });
+    await sb.from('anonymous_usage').insert({ deviceId: deviceId, message_count: 1 });
   }
 }
 
 export async function POST(req: NextRequest) {
   try {
     var body = await req.json();
-    var { messages, agentId, userId, fingerprint } = body;
+    var { messages, agentId, userId, deviceId } = body;
 
     var apiKey = getDefaultApiKey();
     if (!apiKey) {
@@ -61,8 +61,8 @@ export async function POST(req: NextRequest) {
       if (credits < CREDITS_PER_MESSAGE) {
         return NextResponse.json({ error: 'INSUFFICIENT_CREDITS', credits: credits }, { status: 402 });
       }
-    } else if (fingerprint) {
-      var anonCheck = await checkAnonymousLimit(fingerprint);
+    } else if (deviceId) {
+      var anonCheck = await checkAnonymousLimit(deviceId);
       if (!anonCheck.allowed) {
         return NextResponse.json({ error: 'ANON_LIMIT_EXCEEDED' }, { status: 403 });
       }
@@ -104,9 +104,9 @@ export async function POST(req: NextRequest) {
       await deductCredits(userId, CREDITS_PER_MESSAGE, 'AI对话消耗');
       var remainingCredits = await getCredits(userId);
       return NextResponse.json({ content: content, credits: remainingCredits });
-    } else if (fingerprint) {
-      await incrementAnonymousUsage(fingerprint);
-      var anonResult = await checkAnonymousLimit(fingerprint);
+    } else if (deviceId) {
+      await incrementAnonymousUsage(deviceId);
+      var anonResult = await checkAnonymousLimit(deviceId);
       return NextResponse.json({ content: content, remaining: anonResult.remaining });
     }
 
@@ -115,4 +115,5 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: '服务暂时不可用' }, { status: 500 });
   }
 }
+
 

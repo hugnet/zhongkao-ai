@@ -8,27 +8,31 @@ import { CreditBalance } from '@/components/credits/CreditBalance';
 import { CreditRechargeModal } from '@/components/credits/CreditRechargeModal';
 
 interface ChatMsg { id: string; role: 'user' | 'assistant'; content: string; agentId?: string; }
-interface HistoryItem { id: string; agent_id: string; title: string; updated_at: string; }
+interface HistoryItem { id: string; agent_id: string; title: string; messages?: ChatMsg[]; updated_at?: string; }
 
 var FREE_LIMIT = 10;
-var CREDITS_PER_MSG = 10;
 
-function getFingerprint(): string {
+function getDeviceId(): string {
   if (typeof window === 'undefined') return '';
-  var saved = localStorage.getItem('zhongkao_fp');
+  var saved = localStorage.getItem('zhongkao_device_id');
   if (saved) return saved;
-  var parts = [navigator.userAgent, screen.width + 'x' + screen.height, navigator.language, navigator.platform];
-  var raw = parts.join('|');
-  var hash = 0;
-  for (var i = 0; i < raw.length; i++) { hash = ((hash << 5) - hash) + raw.charCodeAt(i); hash |= 0; }
-  var fp = 'fp_' + Math.abs(hash).toString(36);
-  localStorage.setItem('zhongkao_fp', fp);
-  return fp;
+  var id = 'dev_' + crypto.randomUUID();
+  localStorage.setItem('zhongkao_device_id', id);
+  document.cookie = 'zhongkao_did=' + id + ';path=/;max-age=31536000;samesite=lax';
+  return id;
 }
 
 function isLoggedIn(): boolean {
   if (typeof window === 'undefined') return false;
   return (localStorage.getItem('zhongkao_user_id') || '').indexOf('anon_') !== 0;
+}
+
+function loadLocalHistory(): HistoryItem[] {
+  if (typeof window === 'undefined') return [];
+  try { return JSON.parse(localStorage.getItem('zhongkao_chat_history') || '[]'); } catch(e) { return []; }
+}
+function saveLocalHistory(items: HistoryItem[]) {
+  localStorage.setItem('zhongkao_chat_history', JSON.stringify(items));
 }
 
 export default function ChatPage() {
@@ -41,11 +45,10 @@ export default function ChatPage() {
   var [lowBalance, setLowBalance] = useState(0);
   var [freeRemaining, setFreeRemaining] = useState(FREE_LIMIT);
   var [showLoginPrompt, setShowLoginPrompt] = useState(false);
-  var [fingerprint, setFingerprint] = useState('');
+  var [deviceId, setDeviceId] = useState('');
   var [loggedIn, setLoggedIn] = useState(false);
   var [histories, setHistories] = useState<HistoryItem[]>([]);
   var [currentHistoryId, setCurrentHistoryId] = useState<string | null>(null);
-  var [showHistory, setShowHistory] = useState(false);
   var messagesEndRef = useRef<HTMLDivElement>(null);
 
   useEffect(function() { messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [messages]);
@@ -56,50 +59,42 @@ export default function ChatPage() {
     if (!stored) { stored = 'anon_' + generateId(); localStorage.setItem('zhongkao_user_id', stored); }
     setUserId(stored);
     setLoggedIn(hasAcc);
-    var fp = getFingerprint();
-    setFingerprint(fp);
-    if (!hasAcc) {
-      fetch('/api/anonymous-usage', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ fingerprint: fp, action: 'check' }) })
-        .then(function(r) { return r.json(); }).then(function(d) { if (d.ok) setFreeRemaining(d.remaining); }).catch(function() {});
-    }
-    if (hasAcc && stored) loadHistories(stored);
-  }, []);
 
-  function loadHistories(uid: string) {
-    fetch('/api/chat-history?userId=' + uid).then(function(r) { return r.json(); }).then(function(d) {
-      if (d.ok) setHistories(d.histories || []);
-    }).catch(function() {});
-  }
+    var did = getDeviceId();
+    setDeviceId(did);
+
+    if (!hasAcc) {
+      fetch('/api/anonymous-usage', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ deviceId: did, action: 'check' }) })
+        .then(function(r) { return r.json(); })
+        .then(function(d) { if (d.ok) setFreeRemaining(d.remaining); })
+        .catch(function() {});
+      setHistories(loadLocalHistory());
+    }
+  }, []);
 
   function startNewChat() {
     setMessages([]);
     setCurrentHistoryId(null);
-    setShowHistory(false);
   }
 
-  function loadChat(h: HistoryItem) {
-    var sb = require('@supabase/supabase-js');
-    setShowHistory(false);
-    fetch('/api/chat-history?userId=' + userId).then(function(r) { return r.json(); }).then(function(d) {
-      if (d.ok && d.histories) {
-        var found = d.histories.find(function(x: any) { return x.id === h.id; });
-        if (found && found.messages) { setMessages(found.messages); setCurrentHistoryId(h.id); setCurrentAgent(h.agent_id); }
-      }
-    }).catch(function() {});
+  function loadLocalChat(h: HistoryItem) {
+    if (h.messages) { setMessages(h.messages); setCurrentHistoryId(h.id); }
   }
 
-  async function saveChat(msgs: ChatMsg[], agentId: string) {
-    if (!loggedIn || !userId) return;
+  function saveLocalChat(msgs: ChatMsg[], agentId: string) {
+    var hist = loadLocalHistory();
     var title = (msgs[0]?.content || '新对话').slice(0, 30);
-    try {
-      var res = await fetch('/api/chat-history', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ userId: userId, historyId: currentHistoryId, agentId: agentId, title: title, messages: msgs }),
-      });
-      var d = await res.json();
-      if (d.ok && d.id && !currentHistoryId) setCurrentHistoryId(d.id);
-      loadHistories(userId);
-    } catch(e) {}
+    if (currentHistoryId) {
+      hist = hist.map(function(h) { return h.id === currentHistoryId ? { ...h, title: title, messages: msgs, updated_at: new Date().toISOString() } : h; });
+    } else {
+      var newItem: HistoryItem = { id: 'local_' + generateId(), agent_id: agentId, title: title, messages: msgs, updated_at: new Date().toISOString() };
+      hist.unshift(newItem);
+      setCurrentHistoryId(newItem.id);
+    }
+    if (hist.length > 50) hist = hist.slice(0, 50);
+    saveLocalHistory(hist);
+    setHistories(hist);
   }
 
   var agent = AGENTS.find(function(a) { return a.id === currentAgent; });
@@ -108,6 +103,7 @@ export default function ChatPage() {
   async function handleSend() {
     if (!input.trim() || loading) return;
     if (!loggedIn && freeRemaining <= 0) { setShowLoginPrompt(true); return; }
+
     var userMsg: ChatMsg = { id: generateId(), role: 'user', content: input, agentId: currentAgent };
     var newMsgs = messages.concat(userMsg);
     setMessages(newMsgs);
@@ -125,10 +121,10 @@ export default function ChatPage() {
         var reply = data.error ? '出错了，请稍后重试。' : data.content;
         var allMsgs = newMsgs.concat([{ id: generateId(), role: 'assistant', content: reply, agentId: currentAgent }]);
         setMessages(allMsgs);
-        if (loggedIn) saveChat(allMsgs, currentAgent);
+        if (loggedIn) { /* save to supabase */ } else { saveLocalChat(allMsgs, currentAgent); }
       } else {
         var defaultRes = await fetch('/api/chat/default', { method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ messages: newMsgs.map(function(m) { return { role: m.role, content: m.content }; }).slice(-20), agentId: currentAgent, userId: loggedIn ? userId : null, fingerprint: loggedIn ? null : fingerprint }) });
+          body: JSON.stringify({ messages: newMsgs.map(function(m) { return { role: m.role, content: m.content }; }).slice(-20), agentId: currentAgent, userId: loggedIn ? userId : null, deviceId: loggedIn ? null : deviceId }) });
         var defaultData = await defaultRes.json();
         if (defaultData.error === 'ANON_LIMIT_EXCEEDED') { setFreeRemaining(0); setShowLoginPrompt(true); setMessages(messages); }
         else if (defaultData.error === 'INSUFFICIENT_CREDITS') { setLowBalance(defaultData.credits || 0); setShowRecharge(true); }
@@ -137,8 +133,11 @@ export default function ChatPage() {
           var assistantMsg = { id: generateId(), role: 'assistant' as const, content: defaultData.content, agentId: currentAgent };
           var allMsgs2 = newMsgs.concat([assistantMsg]);
           setMessages(allMsgs2);
-          if (!loggedIn) setFreeRemaining(function(p) { return Math.max(0, p - 1); });
-          if (loggedIn) saveChat(allMsgs2, currentAgent);
+          if (!loggedIn) {
+            var newRem = typeof defaultData.remaining === 'number' ? defaultData.remaining : Math.max(0, freeRemaining - 1);
+            setFreeRemaining(newRem);
+            saveLocalChat(allMsgs2, currentAgent);
+          }
         }
       }
     } catch (err: any) {
@@ -165,9 +164,7 @@ export default function ChatPage() {
       ) : null}
 
       <div className="w-52 shrink-0 space-y-2 overflow-y-auto">
-        {loggedIn ? (
-          <button onClick={startNewChat} className="w-full flex items-center gap-2 px-3 py-2 rounded-lg text-sm bg-blue-50 text-blue-600 hover:bg-blue-100 transition-colors font-medium">+ 新对话</button>
-        ) : null}
+        <button onClick={startNewChat} className="w-full flex items-center gap-2 px-3 py-2 rounded-lg text-sm bg-blue-50 text-blue-600 hover:bg-blue-100 transition-colors font-medium">+ 新对话</button>
         <h3 className="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-3">选择学科</h3>
         {SUBJECTS.map(function(sub) {
           return (
@@ -178,13 +175,13 @@ export default function ChatPage() {
           );
         })}
 
-        {loggedIn && histories.length > 0 ? (
+        {histories.length > 0 ? (
           <div className="mt-4 pt-4 border-t border-gray-200">
             <h3 className="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-2">历史对话</h3>
             <div className="space-y-1 max-h-48 overflow-y-auto">
               {histories.slice(0, 20).map(function(h) {
                 return (
-                  <button key={h.id} onClick={function() { loadChat(h); }}
+                  <button key={h.id} onClick={function() { if (h.messages) loadLocalChat(h); }}
                     className={"w-full text-left px-2 py-1.5 rounded text-xs truncate transition-colors " + (currentHistoryId === h.id ? "bg-blue-50 text-blue-700" : "text-gray-500 hover:bg-gray-50")}>
                     {h.title}
                   </button>
