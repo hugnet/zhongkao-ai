@@ -12,7 +12,7 @@ function getDefaultApiKey(): string {
 
 function getSupabase() {
   var url = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
-  var key = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '';
+  var key = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '';
   if (!url || !key) return null;
   return createClient(url, key);
 }
@@ -20,7 +20,7 @@ function getSupabase() {
 export async function POST(req: NextRequest) {
   try {
     var body = await req.json();
-    var { messages, agentId, userId } = body;
+    var { messages, agentId, userId, accessToken } = body;
 
     var apiKey = getDefaultApiKey();
     if (!apiKey) {
@@ -30,23 +30,22 @@ export async function POST(req: NextRequest) {
 
     var provider = getProvider(DEFAULT_PROVIDER_ID);
     if (!provider) {
-      console.error('[chat/default] Provider not found:', DEFAULT_PROVIDER_ID);
       return NextResponse.json({ error: '配置错误' }, { status: 500 });
     }
 
-    if (!userId) {
+    if (!userId || !accessToken) {
       return NextResponse.json({ error: '请先登录后再使用' }, { status: 401 });
     }
 
     var sb = getSupabase();
-    if (sb) {
-      var { data: userData } = await sb.auth.admin.getUserById(userId);
+    if (sb && accessToken) {
+      var { data: userData } = await sb.auth.getUser(accessToken);
       if (!userData?.user?.email_confirmed_at) {
         return NextResponse.json({ error: '请先到邮箱确认后再使用' }, { status: 403 });
       }
     }
 
-    var credits = await getCredits(userId);
+    var credits = await getCredits(userId, accessToken);
     if (credits < 1) {
       return NextResponse.json({ error: 'INSUFFICIENT_CREDITS', credits: credits }, { status: 402 });
     }
@@ -60,7 +59,6 @@ export async function POST(req: NextRequest) {
     }
 
     var url = buildChatURL(provider);
-    console.log('[chat/default] Requesting:', url, 'model:', provider.model);
 
     var res = await fetch(url, {
       method: 'POST',
@@ -97,15 +95,14 @@ export async function POST(req: NextRequest) {
       content = data.choices[0].message.content || '';
     }
     if (!content) {
-      console.error('[chat/default] Empty response:', JSON.stringify(data).slice(0, 500));
       content = '抱歉，暂时无法回答。';
     }
 
     var usage = data.usage || {};
     var creditsUsed = calculateCredits(usage);
-    var description = 'AI对话消耗 (输入' + (usage.prompt_tokens || 0) + ' + 输出' + (usage.completion_tokens || 0) + ' tokens)';
+    var description = 'AI对话 (输入' + (usage.prompt_tokens || 0) + ' + 输出' + (usage.completion_tokens || 0) + ' tokens)';
 
-    var deductResult = await deductCredits(userId, creditsUsed, description);
+    var deductResult = await deductCredits(userId, creditsUsed, description, accessToken);
     var remainingCredits = deductResult.success ? deductResult.balance : credits;
 
     return NextResponse.json({

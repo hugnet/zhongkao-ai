@@ -6,6 +6,7 @@ import { SUBJECTS, AGENTS } from '@/lib/constants';
 import { generateId } from '@/lib/utils';
 import { CreditBalance } from '@/components/credits/CreditBalance';
 import { CreditRechargeModal } from '@/components/credits/CreditRechargeModal';
+import { getSupabase } from '@/lib/supabase/client';
 
 interface ChatMsg { id: string; role: 'user' | 'assistant'; content: string; agentId?: string; tokenInfo?: any; }
 interface HistoryItem { id: string; agent_id: string; title: string; messages?: ChatMsg[]; updated_at?: string; serverId?: string; }
@@ -14,6 +15,15 @@ function isLoggedIn(): boolean {
   if (typeof window === 'undefined') return false;
   var uid = localStorage.getItem('zhongkao_user_id') || '';
   return uid.length > 0 && uid.indexOf('anon_') !== 0;
+}
+
+async function getAccessToken(): Promise<string> {
+  var sb = getSupabase();
+  if (!sb) return '';
+  try {
+    var { data } = await sb.auth.getSession();
+    return data?.session?.access_token || '';
+  } catch(e) { return ''; }
 }
 
 export default function ChatPage() {
@@ -27,7 +37,6 @@ export default function ChatPage() {
   var [loggedIn, setLoggedIn] = useState(false);
   var [histories, setHistories] = useState<HistoryItem[]>([]);
   var [currentHistoryId, setCurrentHistoryId] = useState<string | null>(null);
-  var [lastUsage, setLastUsage] = useState<any>(null);
   var messagesEndRef = useRef<HTMLDivElement>(null);
 
   useEffect(function() { messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [messages]);
@@ -44,7 +53,8 @@ export default function ChatPage() {
 
   async function loadServerHistories(uid: string) {
     try {
-      var res = await fetch('/api/chat-history?userId=' + uid);
+      var token = await getAccessToken();
+      var res = await fetch('/api/chat-history?userId=' + uid + '&accessToken=' + encodeURIComponent(token));
       var data = await res.json();
       if (data.ok && data.histories) {
         var items: HistoryItem[] = data.histories.map(function(h: any) {
@@ -63,7 +73,8 @@ export default function ChatPage() {
     }
     if (h.serverId && userId) {
       try {
-        var res = await fetch('/api/chat-history?userId=' + userId + '&historyId=' + h.serverId);
+        var token = await getAccessToken();
+        var res = await fetch('/api/chat-history?userId=' + userId + '&historyId=' + h.serverId + '&accessToken=' + encodeURIComponent(token));
         var data = await res.json();
         if (data.ok && data.history) {
           var msgs: ChatMsg[] = (data.history.messages || []).map(function(m: any, i: number) {
@@ -84,7 +95,8 @@ export default function ChatPage() {
 
     if (userId) {
       try {
-        var payload: any = { userId: userId, agentId: agentId, title: title, messages: msgs.map(function(m) { return { role: m.role, content: m.content }; }) };
+        var token = await getAccessToken();
+        var payload: any = { userId: userId, agentId: agentId, title: title, messages: msgs.map(function(m) { return { role: m.role, content: m.content }; }), accessToken: token };
         if (currentHistoryId && currentHistoryId.startsWith('server_')) {
           payload.historyId = currentHistoryId.replace('server_', '');
         }
@@ -111,7 +123,6 @@ export default function ChatPage() {
   function startNewChat() {
     setMessages([]);
     setCurrentHistoryId(null);
-    setLastUsage(null);
   }
 
   var agent = AGENTS.find(function(a) { return a.id === currentAgent; });
@@ -130,9 +141,9 @@ export default function ChatPage() {
     setMessages(newMsgs);
     setInput('');
     setLoading(true);
-    setLastUsage(null);
 
     try {
+      var token = await getAccessToken();
       var res = await fetch('/api/chat/default', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -140,6 +151,7 @@ export default function ChatPage() {
           messages: newMsgs.map(function(m) { return { role: m.role, content: m.content }; }).slice(-20),
           agentId: currentAgent,
           userId: userId,
+          accessToken: token,
         }),
       });
       var data = await res.json();
@@ -156,7 +168,6 @@ export default function ChatPage() {
       var assistantMsg: ChatMsg = { id: generateId(), role: 'assistant', content: reply, agentId: currentAgent, tokenInfo: data.usage };
       var allMsgs = newMsgs.concat([assistantMsg]);
       setMessages(allMsgs);
-      setLastUsage(data.usage || null);
       await saveHistory(allMsgs, currentAgent);
     } catch(e: any) {
       var errorMsg = '网络错误，请检查网络连接后重试。';

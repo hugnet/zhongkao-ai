@@ -1,5 +1,6 @@
 ﻿'use client';
 import { useState, useEffect } from 'react';
+import { getSupabase } from '@/lib/supabase/client';
 
 interface CreditBalanceProps {
   userId: string | null;
@@ -12,8 +13,12 @@ export function CreditBalance({ userId, onLowCredits }: CreditBalanceProps) {
 
   useEffect(function() {
     if (!userId) return;
-    fetch('/api/credits?userId=' + userId)
-      .then(function(r) { return r.json(); })
+    var sb = getSupabase();
+    if (!sb) return;
+    sb.auth.getSession().then(function(result) {
+      var token = result.data?.session?.access_token || '';
+      return fetch('/api/credits?userId=' + userId + '&accessToken=' + encodeURIComponent(token));
+    }).then(function(r) { return r.json(); })
       .then(function(data) {
         setBalance(data.balance);
         if (data.balance < 100 && onLowCredits) {
