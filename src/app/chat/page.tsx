@@ -4,7 +4,6 @@ import { useState, useRef, useEffect } from 'react';
 import { Button } from '@/components/ui/button';
 import { SUBJECTS, AGENTS } from '@/lib/constants';
 import { generateId } from '@/lib/utils';
-import { CreditBalance } from '@/components/credits/CreditBalance';
 import { CreditRechargeModal } from '@/components/credits/CreditRechargeModal';
 import { getSupabase } from '@/lib/supabase/client';
 
@@ -15,36 +14,6 @@ function isLoggedIn(): boolean {
   if (typeof window === 'undefined') return false;
   var uid = localStorage.getItem('zhongkao_user_id') || '';
   return uid.length > 0 && uid.indexOf('anon_') !== 0;
-}
-
-function loadHistory(): HistoryItem[] {
-  if (typeof window === 'undefined') return [];
-  try { return JSON.parse(localStorage.getItem('zhongkao_chat_history') || '[]'); } catch(e) { return []; }
-}
-
-function saveHistory(items: HistoryItem[]) {
-  localStorage.setItem('zhongkao_chat_history', JSON.stringify(items));
-}
-
-function getCreditsLocal(): number {
-  if (typeof window === 'undefined') return 3000;
-  var v = localStorage.getItem('zhongkao_credits');
-  if (v !== null) return parseInt(v) || 0;
-  localStorage.setItem('zhongkao_credits', '3000');
-  return 3000;
-}
-
-function setCreditsLocal(n: number) {
-  localStorage.setItem('zhongkao_credits', String(n));
-}
-
-async function getAccessToken(): Promise<string> {
-  var sb = getSupabase();
-  if (!sb) return '';
-  try {
-    var { data } = await sb.auth.getSession();
-    return data?.session?.access_token || '';
-  } catch(e) { return ''; }
 }
 
 export default function ChatPage() {
@@ -58,7 +27,7 @@ export default function ChatPage() {
   var [loggedIn, setLoggedIn] = useState(false);
   var [histories, setHistories] = useState<HistoryItem[]>([]);
   var [currentHistoryId, setCurrentHistoryId] = useState<string | null>(null);
-  var [credits, setCredits] = useState(3000);
+  var [credits, setCredits] = useState<number | null>(null);
   var messagesEndRef = useRef<HTMLDivElement>(null);
 
   useEffect(function() { messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [messages]);
@@ -69,10 +38,75 @@ export default function ChatPage() {
     if (hasAcc) {
       var uid = localStorage.getItem('zhongkao_user_id');
       setUserId(uid);
-      setCredits(getCreditsLocal());
-      setHistories(loadHistory());
+      if (uid) {
+        loadCredits(uid);
+        loadHistories(uid);
+      }
     }
   }, []);
+
+  async function loadCredits(uid: string) {
+    var sb = getSupabase();
+    if (!sb) { setCredits(3000); return; }
+    try {
+      var { data } = await sb.from('credits').select('balance').eq('user_id', uid).single();
+      if (data && data.balance !== undefined && data.balance !== null) {
+        setCredits(data.balance);
+      } else {
+        var { error: insertErr } = await sb.from('credits').insert({ user_id: uid, balance: 3000 });
+        setCredits(3000);
+      }
+    } catch(e) { setCredits(3000); }
+  }
+
+  async function deductCreditsLocal(uid: string, amount: number): Promise<number> {
+    var sb = getSupabase();
+    if (!sb) return (credits || 3000) - amount;
+    try {
+      var { data } = await sb.from('credits').select('balance').eq('user_id', uid).single();
+      var current = data?.balance ?? 3000;
+      var newBalance = current - amount;
+      if (newBalance < 0) newBalance = 0;
+      await sb.from('credits').update({ balance: newBalance, updated_at: new Date().toISOString() }).eq('user_id', uid);
+      await sb.from('credit_transactions').insert({ user_id: uid, amount: -amount, type: 'deduct', description: 'AI对话消耗' });
+      setCredits(newBalance);
+      return newBalance;
+    } catch(e) { return credits || 3000; }
+  }
+
+  async function loadHistories(uid: string) {
+    var sb = getSupabase();
+    if (!sb) return;
+    try {
+      var { data } = await sb.from('chat_history')
+        .select('id, agent_id, title, messages, created_at, updated_at')
+        .eq('user_id', uid)
+        .order('updated_at', { ascending: false })
+        .limit(50);
+      if (data) {
+        var items: HistoryItem[] = data.map(function(h: any) {
+          return { id: String(h.id), agent_id: h.agent_id, title: h.title, messages: h.messages || [], updated_at: h.updated_at };
+        });
+        setHistories(items);
+      }
+    } catch(e) {}
+  }
+
+  async function saveHistoryToDB(uid: string, agentId: string, title: string, msgs: ChatMsg[], historyId?: string) {
+    var sb = getSupabase();
+    if (!sb) return;
+    var payload = { user_id: uid, agent_id: agentId, title: title, messages: msgs.map(function(m) { return { role: m.role, content: m.content }; }), updated_at: new Date().toISOString() };
+    try {
+      if (historyId) {
+        await sb.from('chat_history').update({ title: title, messages: payload.messages, updated_at: payload.updated_at }).eq('id', historyId).eq('user_id', uid);
+      } else {
+        var { data } = await sb.from('chat_history').insert({ user_id: uid, agent_id: agentId, title: title, messages: payload.messages }).select('id').single();
+        if (data) {
+          setCurrentHistoryId(String(data.id));
+        }
+      }
+    } catch(e) {}
+  }
 
   function startNewChat() {
     setMessages([]);
@@ -84,32 +118,14 @@ export default function ChatPage() {
     setCurrentHistoryId(h.id);
   }
 
-  function saveChat(msgs: ChatMsg[], agentId: string) {
-    var title = (msgs.find(function(m) { return m.role === 'user'; })?.content || '新对话').slice(0, 30);
-    var hist = loadHistory();
-
-    if (currentHistoryId) {
-      hist = hist.map(function(h) { return h.id === currentHistoryId ? { ...h, title: title, messages: msgs, updated_at: new Date().toISOString() } : h; });
-    } else {
-      var newItem: HistoryItem = { id: 'local_' + generateId(), agent_id: agentId, title: title, messages: msgs, updated_at: new Date().toISOString() };
-      hist.unshift(newItem);
-      setCurrentHistoryId(newItem.id);
-    }
-    if (hist.length > 100) hist = hist.slice(0, 100);
-    saveHistory(hist);
-    setHistories(hist);
-  }
-
   var agent = AGENTS.find(function(a) { return a.id === currentAgent; });
   var subject = SUBJECTS.find(function(s) { return s.agentId === currentAgent; });
 
   async function handleSend() {
     if (!input.trim() || loading) return;
 
-    if (!loggedIn) {
-      window.location.href = '/login';
-      return;
-    }
+    if (!loggedIn) { window.location.href = '/login'; return; }
+    if (credits !== null && credits < 1) { setLowBalance(0); setShowRecharge(true); return; }
 
     var userMsg: ChatMsg = { id: generateId(), role: 'user', content: input, agentId: currentAgent };
     var newMsgs = messages.concat(userMsg);
@@ -118,7 +134,13 @@ export default function ChatPage() {
     setLoading(true);
 
     try {
-      var token = await getAccessToken();
+      var sb = getSupabase();
+      var token = '';
+      if (sb) {
+        var { data: sessionData } = await sb.auth.getSession();
+        token = sessionData?.session?.access_token || '';
+      }
+
       var res = await fetch('/api/chat/default', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -144,17 +166,17 @@ export default function ChatPage() {
       var allMsgs = newMsgs.concat([assistantMsg]);
       setMessages(allMsgs);
 
-      if (data.usage && data.usage.credits_used) {
-        var newBalance = credits - data.usage.credits_used;
-        if (newBalance < 0) newBalance = 0;
-        setCredits(newBalance);
-        setCreditsLocal(newBalance);
+      if (data.usage && data.usage.credits_used && userId) {
+        await deductCreditsLocal(userId, data.usage.credits_used);
       }
 
-      saveChat(allMsgs, currentAgent);
+      var title = (newMsgs[0]?.content || '新对话').slice(0, 30);
+      if (userId) {
+        await saveHistoryToDB(userId, currentAgent, title, allMsgs, currentHistoryId || undefined);
+        loadHistories(userId);
+      }
     } catch(e: any) {
-      var errorMsg = '网络错误，请检查网络连接后重试。';
-      if (e.message) errorMsg = '请求失败：' + e.message;
+      var errorMsg = '网络错误：' + (e.message || '请检查网络');
       var allMsgs = newMsgs.concat([{ id: generateId(), role: 'assistant', content: errorMsg, agentId: currentAgent }]);
       setMessages(allMsgs);
     }
@@ -167,48 +189,42 @@ export default function ChatPage() {
         <div className="p-3">
           <Button variant="primary" className="w-full" onClick={startNewChat}>+ 新对话</Button>
         </div>
-
         <div className="px-3 pb-1">
-          <div className="space-y-0.5">
-            {SUBJECTS.map(function(sub) {
-              return (
-                <button key={sub.id} onClick={function() { setCurrentAgent(sub.agentId); startNewChat(); }}
-                  className={"w-full text-left px-3 py-2 rounded-lg text-sm transition-colors flex items-center gap-2 " + (currentAgent === sub.agentId ? "bg-blue-50 text-blue-700 font-medium" : "text-gray-600 hover:bg-gray-50")}>
-                  <span>{sub.icon}</span>
-                  <span>{sub.label}</span>
-                </button>
-              );
-            })}
-          </div>
+          {SUBJECTS.map(function(sub) {
+            return (
+              <button key={sub.id} onClick={function() { setCurrentAgent(sub.agentId); startNewChat(); }}
+                className={"w-full text-left px-3 py-2 rounded-lg text-sm transition-colors flex items-center gap-2 " + (currentAgent === sub.agentId ? "bg-blue-50 text-blue-700 font-medium" : "text-gray-600 hover:bg-gray-50")}>
+                <span>{sub.icon}</span><span>{sub.label}</span>
+              </button>
+            );
+          })}
         </div>
-
         <div className="flex-1 overflow-hidden flex flex-col px-3 pt-2 border-t border-gray-100">
           <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2 px-1">历史对话</h3>
           <div className="flex-1 overflow-y-auto space-y-0.5">
             {histories.length === 0 ? (
               <p className="text-xs text-gray-300 px-1 py-4 text-center">暂无历史对话</p>
-            ) : histories.slice(0, 50).map(function(h) {
-              var agentInfo = AGENTS.find(function(a) { return a.id === h.agent_id; });
-              var subInfo = SUBJECTS.find(function(s) { return s.agentId === h.agent_id; });
+            ) : histories.map(function(h) {
+              var a = AGENTS.find(function(ag) { return ag.id === h.agent_id; });
+              var s = SUBJECTS.find(function(sub) { return sub.agentId === h.agent_id; });
               return (
                 <button key={h.id} onClick={function() { loadChat(h); }}
-                  className={"w-full text-left px-3 py-2 rounded-lg text-xs transition-colors group " + (currentHistoryId === h.id ? "bg-blue-50 text-blue-700" : "text-gray-600 hover:bg-gray-50")}>
+                  className={"w-full text-left px-3 py-2 rounded-lg text-xs transition-colors " + (currentHistoryId === h.id ? "bg-blue-50 text-blue-700" : "text-gray-600 hover:bg-gray-50")}>
                   <div className="flex items-center gap-1.5">
-                    <span className="text-sm shrink-0">{subInfo?.icon || '💬'}</span>
+                    <span className="text-sm shrink-0">{s?.icon || '💬'}</span>
                     <span className="truncate font-medium">{h.title}</span>
                   </div>
-                  <div className="text-[10px] text-gray-400 mt-0.5 pl-5">{agentInfo?.name || ''}</div>
+                  <div className="text-[10px] text-gray-400 mt-0.5 pl-5">{a?.name || ''}</div>
                 </button>
               );
             })}
           </div>
         </div>
-
         <div className="p-3 border-t border-gray-100 space-y-2">
           <div className="flex items-center gap-2 px-2">
-            <span className={"font-bold text-sm " + (credits < 100 ? 'text-red-500' : 'text-green-600')}>{credits}</span>
+            <span className={"font-bold text-sm " + ((credits || 0) < 100 ? 'text-red-500' : 'text-green-600')}>{credits !== null ? credits : '--'}</span>
             <span className="text-gray-400 text-xs">积分</span>
-            {credits < 100 ? <button onClick={function() { setShowRecharge(true); }} className="text-xs text-blue-500 hover:underline">充值</button> : null}
+            {credits !== null && credits < 100 ? <button onClick={function() { setShowRecharge(true); }} className="text-xs text-blue-500 hover:underline">充值</button> : null}
           </div>
           <a href="/settings" className="block text-xs text-gray-400 hover:text-blue-600 px-2">&#9881; 设置</a>
         </div>
@@ -222,7 +238,6 @@ export default function ChatPage() {
             <p className="text-sm text-gray-500">{agent?.description.slice(0, 60)}..</p>
           </div>
         </div>
-
         <div className="flex-1 overflow-y-auto chat-messages space-y-4 pr-6 pl-6">
           {messages.length === 0 ? (
             <div className="text-center py-16">
@@ -263,7 +278,6 @@ export default function ChatPage() {
           ) : null}
           <div ref={messagesEndRef} />
         </div>
-
         <div className="mt-4 pt-4 border-t border-gray-200 px-6 pb-4">
           <div className="flex gap-3">
             <input value={input} onChange={function(e) { setInput(e.target.value); }}
@@ -282,7 +296,6 @@ export default function ChatPage() {
           ) : null}
         </div>
       </div>
-
       <CreditRechargeModal open={showRecharge} balance={lowBalance} onClose={function() { setShowRecharge(false); }} />
     </div>
   );

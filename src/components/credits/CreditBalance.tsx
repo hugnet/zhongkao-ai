@@ -1,5 +1,6 @@
 ﻿'use client';
 import { useState, useEffect } from 'react';
+import { getSupabase } from '@/lib/supabase/client';
 
 interface CreditBalanceProps {
   userId: string | null;
@@ -11,13 +12,19 @@ export function CreditBalance({ userId, onLowCredits }: CreditBalanceProps) {
 
   useEffect(function() {
     if (!userId) return;
-    try {
-      var v = localStorage.getItem('zhongkao_credits');
-      var b = v !== null ? parseInt(v) : 3000;
-      if (isNaN(b)) b = 3000;
-      setBalance(b);
-      if (b < 100 && onLowCredits) onLowCredits(b);
-    } catch(e) { setBalance(3000); }
+    var sb = getSupabase();
+    if (!sb) { setBalance(3000); return; }
+    sb.from('credits').select('balance').eq('user_id', userId).single()
+      .then(function(result: any) {
+        var b = result.data?.balance;
+        if (b !== undefined && b !== null) {
+          setBalance(b);
+          if (b < 100 && onLowCredits) onLowCredits(b);
+        } else {
+          setBalance(3000);
+        }
+      })
+      .catch(function() { setBalance(3000); });
   }, [userId]);
 
   if (!userId || balance === null) return null;
