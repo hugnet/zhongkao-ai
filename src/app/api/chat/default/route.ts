@@ -2,11 +2,19 @@
 import { skillEngine } from '@/lib/skills/skillEngine';
 import { getCredits, deductCredits, calculateCredits } from '@/lib/credits';
 import { getProvider, buildChatURL } from '@/lib/ai/providers';
+import { createClient } from '@supabase/supabase-js';
 
 var DEFAULT_PROVIDER_ID = 'agnes';
 
 function getDefaultApiKey(): string {
   return process.env.DEFAULT_API_KEY || '';
+}
+
+function getSupabase() {
+  var url = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
+  var key = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '';
+  if (!url || !key) return null;
+  return createClient(url, key);
 }
 
 export async function POST(req: NextRequest) {
@@ -28,6 +36,14 @@ export async function POST(req: NextRequest) {
 
     if (!userId) {
       return NextResponse.json({ error: '请先登录后再使用' }, { status: 401 });
+    }
+
+    var sb = getSupabase();
+    if (sb) {
+      var { data: userData } = await sb.auth.admin.getUserById(userId);
+      if (!userData?.user?.email_confirmed_at) {
+        return NextResponse.json({ error: '请先到邮箱确认后再使用' }, { status: 403 });
+      }
     }
 
     var credits = await getCredits(userId);

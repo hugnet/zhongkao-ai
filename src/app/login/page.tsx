@@ -17,22 +17,34 @@ export default function LoginPage() {
     setMessage('');
     setLoading(true);
     try {
-      var result = isSignUp ? await signUp(email, password) : await signInWithEmail(email, password);
-      if (result.error) {
-        setMessage(result.error.message);
-      } else {
-        var sb = getSupabase();
-        if (sb) {
-          var { data: sessionData } = await sb.auth.getSession();
-          var user = sessionData?.session?.user;
-          if (user) {
-            localStorage.setItem('zhongkao_user_id', user.id);
-            localStorage.setItem('zhongkao_user_email', user.email || '');
-          }
+      if (isSignUp) {
+        var result = await signUp(email, password);
+        if (result.error) {
+          setMessage(result.error.message);
+        } else {
+          setMessage('注册成功！请查看邮箱并点击确认链接完成注册。确认后即可登录使用。');
         }
-        setMessage(isSignUp ? '注册成功！请查看邮箱确认' : '登录成功！正在跳转...');
-        if (!isSignUp) {
-          setTimeout(function() { window.location.href = '/chat'; }, 500);
+      } else {
+        var result = await signInWithEmail(email, password);
+        if (result.error) {
+          setMessage(result.error.message);
+        } else {
+          var sb = getSupabase();
+          if (sb) {
+            var { data: sessionData } = await sb.auth.getSession();
+            var user = sessionData?.session?.user;
+            if (user) {
+              if (!user.email_confirmed_at) {
+                await sb.auth.signOut();
+                setMessage('请先到邮箱确认后再登录。');
+              } else {
+                localStorage.setItem('zhongkao_user_id', user.id);
+                localStorage.setItem('zhongkao_user_email', user.email || '');
+                setMessage('登录成功！正在跳转...');
+                setTimeout(function() { window.location.href = '/chat'; }, 500);
+              }
+            }
+          }
         }
       }
     } catch (err: any) {
@@ -75,7 +87,7 @@ export default function LoginPage() {
             </Button>
           </form>
           <div className="mt-4 text-center">
-            <button onClick={function() { setIsSignUp(!isSignUp); }} className="text-sm text-blue-600 hover:underline">
+            <button onClick={function() { setIsSignUp(!isSignUp); setMessage(''); }} className="text-sm text-blue-600 hover:underline">
               {isSignUp ? '已有账号？登录' : '没有账号？注册'}
             </button>
           </div>
