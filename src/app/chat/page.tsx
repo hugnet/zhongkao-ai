@@ -9,12 +9,33 @@ import { CreditRechargeModal } from '@/components/credits/CreditRechargeModal';
 import { getSupabase } from '@/lib/supabase/client';
 
 interface ChatMsg { id: string; role: 'user' | 'assistant'; content: string; agentId?: string; tokenInfo?: any; }
-interface HistoryItem { id: string; agent_id: string; title: string; messages?: ChatMsg[]; updated_at?: string; serverId?: string; }
+interface HistoryItem { id: string; agent_id: string; title: string; messages: ChatMsg[]; updated_at: string; }
 
 function isLoggedIn(): boolean {
   if (typeof window === 'undefined') return false;
   var uid = localStorage.getItem('zhongkao_user_id') || '';
   return uid.length > 0 && uid.indexOf('anon_') !== 0;
+}
+
+function loadHistory(): HistoryItem[] {
+  if (typeof window === 'undefined') return [];
+  try { return JSON.parse(localStorage.getItem('zhongkao_chat_history') || '[]'); } catch(e) { return []; }
+}
+
+function saveHistory(items: HistoryItem[]) {
+  localStorage.setItem('zhongkao_chat_history', JSON.stringify(items));
+}
+
+function getCreditsLocal(): number {
+  if (typeof window === 'undefined') return 3000;
+  var v = localStorage.getItem('zhongkao_credits');
+  if (v !== null) return parseInt(v) || 0;
+  localStorage.setItem('zhongkao_credits', '3000');
+  return 3000;
+}
+
+function setCreditsLocal(n: number) {
+  localStorage.setItem('zhongkao_credits', String(n));
 }
 
 async function getAccessToken(): Promise<string> {
@@ -37,6 +58,7 @@ export default function ChatPage() {
   var [loggedIn, setLoggedIn] = useState(false);
   var [histories, setHistories] = useState<HistoryItem[]>([]);
   var [currentHistoryId, setCurrentHistoryId] = useState<string | null>(null);
+  var [credits, setCredits] = useState(3000);
   var messagesEndRef = useRef<HTMLDivElement>(null);
 
   useEffect(function() { messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [messages]);
@@ -47,82 +69,35 @@ export default function ChatPage() {
     if (hasAcc) {
       var uid = localStorage.getItem('zhongkao_user_id');
       setUserId(uid);
-      loadServerHistories(uid!);
+      setCredits(getCreditsLocal());
+      setHistories(loadHistory());
     }
   }, []);
-
-  async function loadServerHistories(uid: string) {
-    try {
-      var token = await getAccessToken();
-      var res = await fetch('/api/chat-history?userId=' + uid + '&accessToken=' + encodeURIComponent(token));
-      var data = await res.json();
-      if (data.ok && data.histories) {
-        var items: HistoryItem[] = data.histories.map(function(h: any) {
-          return { id: 'server_' + h.id, serverId: h.id, agent_id: h.agent_id, title: h.title, updated_at: h.updated_at, messages: undefined };
-        });
-        setHistories(items);
-      }
-    } catch(e) {}
-  }
-
-  async function loadHistoryMessages(h: HistoryItem) {
-    if (h.messages) {
-      setMessages(h.messages);
-      setCurrentHistoryId(h.id);
-      return;
-    }
-    if (h.serverId && userId) {
-      try {
-        var token = await getAccessToken();
-        var res = await fetch('/api/chat-history?userId=' + userId + '&historyId=' + h.serverId + '&accessToken=' + encodeURIComponent(token));
-        var data = await res.json();
-        if (data.ok && data.history) {
-          var msgs: ChatMsg[] = (data.history.messages || []).map(function(m: any, i: number) {
-            return { id: 'msg_' + i, role: m.role, content: m.content, agentId: h.agent_id };
-          });
-          setMessages(msgs);
-          setCurrentHistoryId(h.id);
-          setHistories(function(prev) {
-            return prev.map(function(item) { return item.id === h.id ? { ...item, messages: msgs } : item; });
-          });
-        }
-      } catch(e) {}
-    }
-  }
-
-  async function saveHistory(msgs: ChatMsg[], agentId: string) {
-    var title = (msgs.find(function(m) { return m.role === 'user'; })?.content || '新对话').slice(0, 30);
-
-    if (userId) {
-      try {
-        var token = await getAccessToken();
-        var payload: any = { userId: userId, agentId: agentId, title: title, messages: msgs.map(function(m) { return { role: m.role, content: m.content }; }), accessToken: token };
-        if (currentHistoryId && currentHistoryId.startsWith('server_')) {
-          payload.historyId = currentHistoryId.replace('server_', '');
-        }
-        var res = await fetch('/api/chat-history', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
-        var data = await res.json();
-        if (data.ok && data.id && !currentHistoryId) {
-          var newId = 'server_' + data.id;
-          setCurrentHistoryId(newId);
-          setHistories(function(prev) {
-            var newItem: HistoryItem = { id: newId, serverId: data.id, agent_id: agentId, title: title, messages: msgs, updated_at: new Date().toISOString() };
-            return [newItem].concat(prev.filter(function(h) { return h.id !== newId; }));
-          });
-          return;
-        }
-        if (data.ok) {
-          setHistories(function(prev) {
-            return prev.map(function(h) { return h.id === currentHistoryId ? { ...h, title: title, messages: msgs, updated_at: new Date().toISOString() } : h; });
-          });
-        }
-      } catch(e) {}
-    }
-  }
 
   function startNewChat() {
     setMessages([]);
     setCurrentHistoryId(null);
+  }
+
+  function loadChat(h: HistoryItem) {
+    setMessages(h.messages);
+    setCurrentHistoryId(h.id);
+  }
+
+  function saveChat(msgs: ChatMsg[], agentId: string) {
+    var title = (msgs.find(function(m) { return m.role === 'user'; })?.content || '新对话').slice(0, 30);
+    var hist = loadHistory();
+
+    if (currentHistoryId) {
+      hist = hist.map(function(h) { return h.id === currentHistoryId ? { ...h, title: title, messages: msgs, updated_at: new Date().toISOString() } : h; });
+    } else {
+      var newItem: HistoryItem = { id: 'local_' + generateId(), agent_id: agentId, title: title, messages: msgs, updated_at: new Date().toISOString() };
+      hist.unshift(newItem);
+      setCurrentHistoryId(newItem.id);
+    }
+    if (hist.length > 100) hist = hist.slice(0, 100);
+    saveHistory(hist);
+    setHistories(hist);
   }
 
   var agent = AGENTS.find(function(a) { return a.id === currentAgent; });
@@ -168,7 +143,15 @@ export default function ChatPage() {
       var assistantMsg: ChatMsg = { id: generateId(), role: 'assistant', content: reply, agentId: currentAgent, tokenInfo: data.usage };
       var allMsgs = newMsgs.concat([assistantMsg]);
       setMessages(allMsgs);
-      await saveHistory(allMsgs, currentAgent);
+
+      if (data.usage && data.usage.credits_used) {
+        var newBalance = credits - data.usage.credits_used;
+        if (newBalance < 0) newBalance = 0;
+        setCredits(newBalance);
+        setCreditsLocal(newBalance);
+      }
+
+      saveChat(allMsgs, currentAgent);
     } catch(e: any) {
       var errorMsg = '网络错误，请检查网络连接后重试。';
       if (e.message) errorMsg = '请求失败：' + e.message;
@@ -180,45 +163,59 @@ export default function ChatPage() {
 
   return (
     <div className="flex h-[calc(100vh-4rem)]">
-      <div className="w-64 border-r border-gray-200 bg-white p-4 flex flex-col shrink-0">
-        <Button variant="primary" className="w-full mb-4" onClick={startNewChat}>+ 新对话</Button>
-
-        <div className="space-y-1 mb-2">
-          {SUBJECTS.map(function(sub) {
-            return (
-              <button key={sub.id} onClick={function() { setCurrentAgent(sub.agentId); startNewChat(); }}
-                className={"w-full text-left px-3 py-2 rounded-lg text-sm transition-colors flex items-center gap-2 " + (currentAgent === sub.agentId ? "bg-blue-50 text-blue-700 font-medium" : "text-gray-600 hover:bg-gray-50")}>
-                <span>{sub.icon}</span>
-                <span>{sub.label}</span>
-              </button>
-            );
-          })}
+      <div className="w-72 border-r border-gray-200 bg-white flex flex-col shrink-0">
+        <div className="p-3">
+          <Button variant="primary" className="w-full" onClick={startNewChat}>+ 新对话</Button>
         </div>
 
-        {histories.length > 0 ? (
-          <div className="mt-4 pt-4 border-t border-gray-200 flex-1 overflow-hidden flex flex-col">
-            <h3 className="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-2">历史对话</h3>
-            <div className="space-y-1 overflow-y-auto flex-1">
-              {histories.slice(0, 30).map(function(h) {
-                return (
-                  <button key={h.id} onClick={function() { loadHistoryMessages(h); }}
-                    className={"w-full text-left px-2 py-1.5 rounded text-xs truncate transition-colors " + (currentHistoryId === h.id ? "bg-blue-50 text-blue-700" : "text-gray-500 hover:bg-gray-50")}>
-                    {h.title}
-                  </button>
-                );
-              })}
-            </div>
+        <div className="px-3 pb-1">
+          <div className="space-y-0.5">
+            {SUBJECTS.map(function(sub) {
+              return (
+                <button key={sub.id} onClick={function() { setCurrentAgent(sub.agentId); startNewChat(); }}
+                  className={"w-full text-left px-3 py-2 rounded-lg text-sm transition-colors flex items-center gap-2 " + (currentAgent === sub.agentId ? "bg-blue-50 text-blue-700 font-medium" : "text-gray-600 hover:bg-gray-50")}>
+                  <span>{sub.icon}</span>
+                  <span>{sub.label}</span>
+                </button>
+              );
+            })}
           </div>
-        ) : null}
+        </div>
 
-        <div className="mt-4 pt-4 border-t border-gray-200 space-y-2">
-          <CreditBalance userId={userId} onLowCredits={function(b) { setLowBalance(b); setShowRecharge(true); }} />
-          <a href="/settings" className="block text-xs text-gray-400 hover:text-blue-600">&#9881; 设置</a>
+        <div className="flex-1 overflow-hidden flex flex-col px-3 pt-2 border-t border-gray-100">
+          <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2 px-1">历史对话</h3>
+          <div className="flex-1 overflow-y-auto space-y-0.5">
+            {histories.length === 0 ? (
+              <p className="text-xs text-gray-300 px-1 py-4 text-center">暂无历史对话</p>
+            ) : histories.slice(0, 50).map(function(h) {
+              var agentInfo = AGENTS.find(function(a) { return a.id === h.agent_id; });
+              var subInfo = SUBJECTS.find(function(s) { return s.agentId === h.agent_id; });
+              return (
+                <button key={h.id} onClick={function() { loadChat(h); }}
+                  className={"w-full text-left px-3 py-2 rounded-lg text-xs transition-colors group " + (currentHistoryId === h.id ? "bg-blue-50 text-blue-700" : "text-gray-600 hover:bg-gray-50")}>
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-sm shrink-0">{subInfo?.icon || '💬'}</span>
+                    <span className="truncate font-medium">{h.title}</span>
+                  </div>
+                  <div className="text-[10px] text-gray-400 mt-0.5 pl-5">{agentInfo?.name || ''}</div>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
+        <div className="p-3 border-t border-gray-100 space-y-2">
+          <div className="flex items-center gap-2 px-2">
+            <span className={"font-bold text-sm " + (credits < 100 ? 'text-red-500' : 'text-green-600')}>{credits}</span>
+            <span className="text-gray-400 text-xs">积分</span>
+            {credits < 100 ? <button onClick={function() { setShowRecharge(true); }} className="text-xs text-blue-500 hover:underline">充值</button> : null}
+          </div>
+          <a href="/settings" className="block text-xs text-gray-400 hover:text-blue-600 px-2">&#9881; 设置</a>
         </div>
       </div>
 
       <div className="flex-1 flex flex-col">
-        <div className="flex items-center gap-3 mb-4 pb-4 border-b border-gray-200 px-6">
+        <div className="flex items-center gap-3 mb-4 pb-4 border-b border-gray-200 px-6 pt-4">
           <span className="text-3xl">{subject?.icon}</span>
           <div className="flex-1">
             <h2 className="font-bold text-gray-900">{agent?.name} · {agent?.title}</h2>
