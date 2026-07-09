@@ -15,11 +15,11 @@ export function CreditBalance({ userId, onLowCredits }: CreditBalanceProps) {
     if (!userId) return;
     var sb = getSupabase();
     if (!sb) return;
-    sb.auth.getSession().then(function(result) {
+    sb.auth.getSession().then(function(result: any) {
       var token = result.data?.session?.access_token || '';
       return fetch('/api/credits?userId=' + userId + '&accessToken=' + encodeURIComponent(token));
-    }).then(function(r) { return r.json(); })
-      .then(function(data) {
+    }).then(function(r: any) { return r.json(); })
+      .then(function(data: any) {
         setBalance(data.balance);
         if (data.balance < 100 && onLowCredits) {
           onLowCredits(data.balance);
