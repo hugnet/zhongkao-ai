@@ -1,52 +1,101 @@
 ﻿import { NextRequest, NextResponse } from 'next/server';
-import { createClient } from '@supabase/supabase-js';
 
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
 const SUPABASE_ANON_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '';
 
-function getSupabase(accessToken?: string) {
-  if (!SUPABASE_URL || !SUPABASE_ANON_KEY) return null;
-  if (accessToken) {
-    return createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
-      global: { headers: { Authorization: 'Bearer ' + accessToken } },
-    });
+async function restQuery(table: string, query: string, accessToken: string) {
+  var url = SUPABASE_URL + '/rest/v1/' + table + query;
+  var res = await fetch(url, {
+    headers: {
+      'Authorization': 'Bearer ' + accessToken,
+      'apikey': SUPABASE_ANON_KEY,
+      'Content-Type': 'application/json',
+    },
+  });
+  if (!res.ok) {
+    var errText = await res.text().catch(function() { return ''; });
+    console.error('[chat-history] REST query error:', res.status, errText.slice(0, 300));
+    return null;
   }
-  var serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
-  if (serviceKey) return createClient(SUPABASE_URL, serviceKey);
-  return null;
+  return res.json();
+}
+
+async function restInsert(table: string, body: any, accessToken: string) {
+  var url = SUPABASE_URL + '/rest/v1/' + table;
+  var res = await fetch(url, {
+    method: 'POST',
+    headers: {
+      'Authorization': 'Bearer ' + accessToken,
+      'apikey': SUPABASE_ANON_KEY,
+      'Content-Type': 'application/json',
+      'Prefer': 'return=representation',
+    },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) {
+    var errText = await res.text().catch(function() { return ''; });
+    console.error('[chat-history] REST insert error:', res.status, errText.slice(0, 300));
+    return null;
+  }
+  return res.json();
+}
+
+async function restUpdate(table: string, query: string, body: any, accessToken: string) {
+  var url = SUPABASE_URL + '/rest/v1/' + table + query;
+  var res = await fetch(url, {
+    method: 'PATCH',
+    headers: {
+      'Authorization': 'Bearer ' + accessToken,
+      'apikey': SUPABASE_ANON_KEY,
+      'Content-Type': 'application/json',
+      'Prefer': 'return=minimal',
+    },
+    body: JSON.stringify(body),
+  });
+  return res.ok;
+}
+
+async function restDelete(table: string, query: string, accessToken: string) {
+  var url = SUPABASE_URL + '/rest/v1/' + table + query;
+  var res = await fetch(url, {
+    method: 'DELETE',
+    headers: {
+      'Authorization': 'Bearer ' + accessToken,
+      'apikey': SUPABASE_ANON_KEY,
+      'Content-Type': 'application/json',
+      'Prefer': 'return=minimal',
+    },
+  });
+  return res.ok;
 }
 
 export async function GET(req: NextRequest) {
   var userId = req.nextUrl.searchParams.get('userId');
   var historyId = req.nextUrl.searchParams.get('historyId');
   var accessToken = req.nextUrl.searchParams.get('accessToken');
-  if (!userId) return NextResponse.json({ ok: false });
-  var sb = getSupabase(accessToken || undefined);
-  if (!sb) return NextResponse.json({ ok: true, histories: [] });
+  if (!userId || !accessToken) return NextResponse.json({ ok: false });
 
   if (historyId) {
-    var result = await sb.from('chat_history').select('id, agent_id, title, messages, created_at, updated_at').eq('id', historyId).eq('user_id', userId).single();
-    return NextResponse.json({ ok: true, history: result.data });
+    var row = await restQuery('chat_history', '?id=eq.' + historyId + '&user_id=eq.' + userId + '&select=id,agent_id,title,messages,created_at,updated_at', accessToken);
+    return NextResponse.json({ ok: true, history: (row && row[0]) || null });
   }
 
-  var list = await sb.from('chat_history').select('id, agent_id, title, created_at, updated_at').eq('user_id', userId).order('updated_at', { ascending: false }).limit(50);
-  return NextResponse.json({ ok: true, histories: list.data || [] });
+  var list = await restQuery('chat_history', '?user_id=eq.' + userId + '&order=updated_at.desc&limit=50&select=id,agent_id,title,created_at,updated_at', accessToken);
+  return NextResponse.json({ ok: true, histories: list || [] });
 }
 
 export async function POST(req: NextRequest) {
   try {
     var body = await req.json();
     var { userId, historyId, agentId, title, messages, accessToken } = body;
-    if (!userId) return NextResponse.json({ ok: false });
-    var sb = getSupabase(accessToken);
-    if (!sb) return NextResponse.json({ ok: false, error: '数据库未配置' });
+    if (!userId || !accessToken) return NextResponse.json({ ok: false });
 
     if (historyId) {
-      await sb.from('chat_history').update({ messages: messages, title: title, updated_at: new Date().toISOString() }).eq('id', historyId).eq('user_id', userId);
+      await restUpdate('chat_history', '?id=eq.' + historyId + '&user_id=eq.' + userId, { messages: messages, title: title, updated_at: new Date().toISOString() }, accessToken);
       return NextResponse.json({ ok: true, id: historyId });
     } else {
-      var insertResult = await sb.from('chat_history').insert({ user_id: userId, agent_id: agentId, title: title || '新对话', messages: messages }).select('id').single();
-      return NextResponse.json({ ok: true, id: insertResult.data?.id });
+      var result = await restInsert('chat_history', { user_id: userId, agent_id: agentId, title: title || '新对话', messages: messages }, accessToken);
+      return NextResponse.json({ ok: true, id: result && result[0] ? result[0].id : null });
     }
   } catch (err: any) {
     return NextResponse.json({ ok: false, error: err.message });
@@ -57,9 +106,7 @@ export async function DELETE(req: NextRequest) {
   var userId = req.nextUrl.searchParams.get('userId');
   var historyId = req.nextUrl.searchParams.get('historyId');
   var accessToken = req.nextUrl.searchParams.get('accessToken');
-  if (!userId || !historyId) return NextResponse.json({ ok: false });
-  var sb = getSupabase(accessToken || undefined);
-  if (!sb) return NextResponse.json({ ok: true });
-  await sb.from('chat_history').delete().eq('id', historyId).eq('user_id', userId);
+  if (!userId || !historyId || !accessToken) return NextResponse.json({ ok: false });
+  await restDelete('chat_history', '?id=eq.' + historyId + '&user_id=eq.' + userId, accessToken);
   return NextResponse.json({ ok: true });
 }
