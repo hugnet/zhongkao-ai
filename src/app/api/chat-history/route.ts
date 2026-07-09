@@ -16,12 +16,12 @@ export async function GET(req: NextRequest) {
   if (!sb) return NextResponse.json({ ok: true, histories: [] });
 
   if (historyId) {
-    var { data } = await sb.from('chat_history').select('id, agent_id, title, messages, created_at, updated_at').eq('id', historyId).eq('user_id', userId).single();
-    return NextResponse.json({ ok: true, history: data });
+    var result = await sb.from('chat_history').select('id, agent_id, title, messages, created_at, updated_at').eq('id', historyId).eq('user_id', userId).single();
+    return NextResponse.json({ ok: true, history: result.data });
   }
 
-  var { data } = await sb.from('chat_history').select('id, agent_id, title, created_at, updated_at').eq('user_id', userId).order('updated_at', { ascending: false }).limit(50);
-  return NextResponse.json({ ok: true, histories: data || [] });
+  var list = await sb.from('chat_history').select('id, agent_id, title, created_at, updated_at').eq('user_id', userId).order('updated_at', { ascending: false }).limit(50);
+  return NextResponse.json({ ok: true, histories: list.data || [] });
 }
 
 export async function POST(req: NextRequest) {
@@ -36,8 +36,8 @@ export async function POST(req: NextRequest) {
       await sb.from('chat_history').update({ messages: messages, title: title, updated_at: new Date().toISOString() }).eq('id', historyId).eq('user_id', userId);
       return NextResponse.json({ ok: true, id: historyId });
     } else {
-      var { data } = await sb.from('chat_history').insert({ user_id: userId, agent_id: agentId, title: title || '新对话', messages: messages }).select('id').single();
-      return NextResponse.json({ ok: true, id: data?.id });
+      var insertResult = await sb.from('chat_history').insert({ user_id: userId, agent_id: agentId, title: title || '新对话', messages: messages }).select('id').single();
+      return NextResponse.json({ ok: true, id: insertResult.data?.id });
     }
   } catch (err: any) {
     return NextResponse.json({ ok: false });
