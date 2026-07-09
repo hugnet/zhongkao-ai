@@ -1,5 +1,4 @@
 ﻿'use client';
-
 import { useState, useEffect } from 'react';
 
 interface CreditBalanceProps {
@@ -35,14 +34,14 @@ export function CreditBalance({ userId, onLowCredits }: CreditBalanceProps) {
       <span className={"font-bold " + color}>{balance}</span>
       <span className="text-gray-500 text-xs">积分</span>
       {balance < 100 ? <span className="text-xs text-red-500 animate-pulse">!</span> : null}
-      
+
       {showDetails ? (
         <div className="absolute top-full right-0 mt-2 w-64 bg-white border border-gray-200 rounded-xl shadow-lg p-4 z-50">
           <div className="text-sm font-medium text-gray-900 mb-2">积分余额</div>
           <div className="text-3xl font-bold text-gray-900 mb-1">{balance}</div>
-          <div className="text-xs text-gray-400 mb-3">每次对话消耗10积分</div>
+          <div className="text-xs text-gray-400 mb-3">按实际对话token消耗扣除</div>
           <div className="text-xs text-gray-500">
-            {balance > 0 ? '还可对话约 ' + Math.floor(balance / 10) + ' 次' : '积分已用完'}
+            {balance > 0 ? '积分充足，可正常使用' : '积分已用完，请充值'}
           </div>
           <a href="/pricing" className="block mt-3 text-center text-xs bg-blue-600 text-white py-1.5 rounded-lg hover:bg-blue-700 transition-colors">
             充值积分

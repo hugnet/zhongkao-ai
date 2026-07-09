@@ -1,6 +1,6 @@
 ﻿import { NextRequest, NextResponse } from 'next/server';
 import { skillEngine } from '@/lib/skills/skillEngine';
-import { getCredits, deductCredits, CREDITS_PER_MESSAGE } from '@/lib/credits';
+import { getCredits, deductCredits, calculateCredits } from '@/lib/credits';
 import { getProvider, buildChatURL } from '@/lib/ai/providers';
 
 var DEFAULT_PROVIDER_ID = 'agnes';
@@ -31,7 +31,7 @@ export async function POST(req: NextRequest) {
     }
 
     var credits = await getCredits(userId);
-    if (credits < CREDITS_PER_MESSAGE) {
+    if (credits < 1) {
       return NextResponse.json({ error: 'INSUFFICIENT_CREDITS', credits: credits }, { status: 402 });
     }
 
@@ -85,10 +85,23 @@ export async function POST(req: NextRequest) {
       content = '抱歉，暂时无法回答。';
     }
 
-    var deductResult = await deductCredits(userId, CREDITS_PER_MESSAGE, 'AI对话消耗');
-    var remainingCredits = deductResult.success ? deductResult.balance : credits - CREDITS_PER_MESSAGE;
+    var usage = data.usage || {};
+    var creditsUsed = calculateCredits(usage);
+    var description = 'AI对话消耗 (输入' + (usage.prompt_tokens || 0) + ' + 输出' + (usage.completion_tokens || 0) + ' tokens)';
 
-    return NextResponse.json({ content: content, credits: remainingCredits });
+    var deductResult = await deductCredits(userId, creditsUsed, description);
+    var remainingCredits = deductResult.success ? deductResult.balance : credits;
+
+    return NextResponse.json({
+      content: content,
+      credits: remainingCredits,
+      usage: {
+        prompt_tokens: usage.prompt_tokens || 0,
+        completion_tokens: usage.completion_tokens || 0,
+        total_tokens: usage.total_tokens || 0,
+        credits_used: creditsUsed,
+      },
+    });
   } catch (err: any) {
     console.error('[chat/default] Exception:', err.message, err.stack);
     return NextResponse.json({ error: '服务暂时不可用：' + (err.message || '未知错误') }, { status: 500 });

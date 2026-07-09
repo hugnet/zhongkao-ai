@@ -3,7 +3,7 @@
 import Link from 'next/link';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
-import { AGENTS, SUBJECTS, PRICING_PLANS } from '@/lib/constants';
+import { AGENTS, SUBJECTS } from '@/lib/constants';
 
 export default function Home() {
   return (
@@ -16,8 +16,7 @@ export default function Home() {
           你的专属<span className="text-blue-600">中考提分私教</span>
         </h1>
         <p className="text-lg text-gray-600 max-w-2xl mx-auto mb-10">
-          算无遗、力拔山、化生慧、文心雕、语通巧、策无遗 - 6位AI专家24小时在线，
-          用55个蒸馏技能帮你系统突破中考各科压轴难关。
+          算无遗、力拔山、化生慧、文心雕、语通巧、策无遗 - 6位AI专家24小时在线，用55个蒸馏技能帮你系统突破中考各科压轴难关。
         </p>
         <div className="flex items-center justify-center gap-4">
           <Link href="/chat">
@@ -27,7 +26,7 @@ export default function Home() {
             <Button variant="outline" size="lg">查看定价</Button>
           </Link>
         </div>
-        <p className="text-sm text-gray-400 mt-4">注册送5000积分 · 可免费对话约500次 · 无需API Key</p>
+        <p className="text-sm text-gray-400 mt-4">注册送3000积分 · 按实际token消耗扣除 · 无需API Key</p>
       </section>
 
       <section className="bg-white py-16">
@@ -85,19 +84,19 @@ export default function Home() {
           <h2 className="text-3xl font-bold text-center text-gray-900 mb-8">积分定价，透明简单</h2>
           <div className="grid grid-cols-1 md:grid-cols-3 gap-6 text-center">
             <div className="p-6 bg-green-50 rounded-2xl border border-green-200">
-              <div className="text-3xl font-bold text-green-600 mb-1">5000</div>
+              <div className="text-3xl font-bold text-green-600 mb-1">3000</div>
               <div className="text-sm text-gray-600 mb-2">免费赠送积分</div>
-              <div className="text-xs text-gray-400">注册即得，约500次对话</div>
+              <div className="text-xs text-gray-400">注册即得，按token实际消耗使用</div>
             </div>
             <div className="p-6 bg-blue-50 rounded-2xl border border-blue-200">
-              <div className="text-3xl font-bold text-blue-600 mb-1">10</div>
-              <div className="text-sm text-gray-600 mb-2">每次对话消耗积分</div>
-              <div className="text-xs text-gray-400">单次仅约0.08元</div>
+              <div className="text-3xl font-bold text-blue-600 mb-1">按量</div>
+              <div className="text-sm text-gray-600 mb-2">按token实际消耗扣除</div>
+              <div className="text-xs text-gray-400">输入1积分/千token + 输出3积分/千token</div>
             </div>
             <div className="p-6 bg-purple-50 rounded-2xl border border-purple-200">
               <div className="text-3xl font-bold text-purple-600 mb-1">&infin;</div>
-              <div className="text-sm text-gray-600 mb-2">会员无限对话</div>
-              <div className="text-xs text-gray-400">月卡49元/年卡399元</div>
+              <div className="text-sm text-gray-600 mb-2">会员赠送大量积分</div>
+              <div className="text-xs text-gray-400">月卡49元送3万/年卡399元送50万</div>
             </div>
           </div>
           <div className="text-center mt-6">
@@ -119,7 +118,7 @@ export default function Home() {
       <footer className="bg-gray-900 text-gray-400 py-12">
         <div className="max-w-6xl mx-auto px-4 text-center text-sm">
           <p className="mb-2">中考提分 AI 私教 · 6位专家助力中考冲刺</p>
-          <p>基于 DeepSeek 大模型 · 海外服务器 · 数据加密传输</p>
+          <p>基于 AI大模型 · 海外服务器 · 数据加密传输</p>
         </div>
       </footer>
     </div>

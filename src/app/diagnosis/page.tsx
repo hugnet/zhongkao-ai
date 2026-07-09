@@ -1,14 +1,11 @@
 ﻿'use client';
-
 import { useState, useEffect } from 'react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
-import { generateId } from '@/lib/utils';
 
 export default function DiagnosisPage() {
   var [scores, setScores] = useState<Record<string, string>>({ math:'', physics:'', chemistry:'', chinese:'', english:'' });
   var [targets, setTargets] = useState<Record<string, string>>({ math:'', physics:'', chemistry:'', chinese:'', english:'' });
-  var [months, setMonths] = useState('6');
   var [userId, setUserId] = useState('');
   var [report, setReport] = useState('');
   var [loading, setLoading] = useState(false);
@@ -21,14 +18,9 @@ export default function DiagnosisPage() {
   }, []);
 
   async function handleGenerate() {
+    if (!userId) { window.location.href = '/login'; return; }
     setLoading(true);
     setReport("");
-    var scoreNums: Record<string, number> = {};
-    var targetNums: Record<string, number> = {};
-    for (var [key] of subjects) {
-      scoreNums[key] = parseInt(scores[key]) || 0;
-      targetNums[key] = parseInt(targets[key]) || 0;
-    }
     try {
       var res = await fetch('/api/chat/default', {
         method: 'POST',
@@ -56,13 +48,14 @@ export default function DiagnosisPage() {
   return (
     <div className="max-w-3xl mx-auto px-4 py-12">
       <h1 className="text-3xl font-bold text-gray-900 mb-2">学情诊断</h1>
-      <p className="text-gray-500 mb-8">输入各科成绩，AI 为你生成个性化冲刺计划（消耗10积分）</p>
+      <p className="text-gray-500 mb-8">输入各科成绩，AI 为你生成个性化冲刺计划（按token消耗积分）</p>
       <Card>
         <CardContent className="p-6 space-y-4">
           <div className="grid grid-cols-2 gap-4">
             <div>
               <h3 className="text-sm font-semibold text-gray-700 mb-3">当前成绩</h3>
-              {subjects.map(function([key, label]) {
+              {subjects.map(function(pair) {
+                var key = pair[0], label = pair[1];
                 return (
                   <div key={key} className="flex items-center gap-2 mb-2">
                     <span className="text-sm text-gray-600 w-12">{label}</span>
@@ -75,7 +68,8 @@ export default function DiagnosisPage() {
             </div>
             <div>
               <h3 className="text-sm font-semibold text-gray-700 mb-3">目标成绩</h3>
-              {subjects.map(function([key, label]) {
+              {subjects.map(function(pair) {
+                var key = pair[0], label = pair[1];
                 return (
                   <div key={key} className="flex items-center gap-2 mb-2">
                     <span className="text-sm text-gray-600 w-12">{label}</span>
@@ -87,22 +81,23 @@ export default function DiagnosisPage() {
               })}
             </div>
           </div>
-          <div className="flex items-center gap-3">
-            <span className="text-sm text-gray-600">距离中考</span>
-            <input type="number" value={months} onChange={function(e) { setMonths(e.target.value); }}
-              className="w-16 px-2 py-1 border border-gray-300 rounded text-sm" min="1" max="12" />
-            <span className="text-sm text-gray-600">个月</span>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">距中考月数</label>
+            <input type="number" value={userId ? '6' : ''} placeholder="6" disabled className="w-20 px-2 py-1 border border-gray-300 rounded text-sm bg-gray-50" />
           </div>
-          <Button variant="primary" onClick={handleGenerate} disabled={loading || !userId}>
-            {loading ? "AI 正在分析..." : "生成诊断报告（-10积分）"}
+          <Button variant="primary" onClick={handleGenerate} disabled={loading} className="w-full">
+            {loading ? "AI 正在分析..." : "生成诊断报告"}
           </Button>
         </CardContent>
       </Card>
+
       {report ? (
         <Card className="mt-6">
           <CardContent className="p-6">
-            <h3 className="font-bold text-gray-900 mb-3">诊断报告</h3>
-            <div className="text-sm text-gray-700 whitespace-pre-wrap leading-relaxed">{report}</div>
+            <h2 className="font-bold text-gray-900 mb-3">诊断报告</h2>
+            <div className="text-sm text-gray-700 whitespace-pre-wrap leading-relaxed">
+              {report}
+            </div>
           </CardContent>
         </Card>
       ) : null}

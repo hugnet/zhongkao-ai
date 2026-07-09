@@ -32,14 +32,14 @@ export async function GET(req: NextRequest) {
     const { data: credits } = await sb.from('credits').select('user_id, balance');
     const { data: tx } = await sb.from('credit_transactions').select('amount, type');
 
-    users = (profiles || []).map(p => {
-      const c = credits?.find(cr => cr.user_id === p.id);
-      return { email: p.email, credits: c?.balance ?? 5000, created_at: p.created_at };
+    users = (profiles || []).map(function(p) {
+      var c = credits?.find(function(cr) { return cr.user_id === p.id; });
+      return { email: p.email, credits: c?.balance ?? 3000, created_at: p.created_at };
     });
 
     stats.totalUsers = users.length;
-    stats.totalCredits = credits?.reduce((sum, c) => sum + (c.balance || 0), 0) || 0;
-    stats.totalMessages = (tx || []).filter(t => t.type === 'deduct').length;
+    stats.totalCredits = credits?.reduce(function(sum, c) { return sum + (c.balance || 0); }, 0) || 0;
+    stats.totalMessages = (tx || []).filter(function(t) { return t.type === 'deduct'; }).length;
   }
 
   return NextResponse.json({ ok: true, users, stats });
@@ -78,7 +78,7 @@ export async function POST(req: NextRequest) {
         }),
       });
       if (!res.ok) {
-        const err = await res.text().catch(() => '');
+        const err = await res.text().catch(function() { return ''; });
         return NextResponse.json({ ok: false, error: 'HTTP ' + res.status + ': ' + err.slice(0, 200) });
       }
       const data = await res.json();

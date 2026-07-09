@@ -1,6 +1,8 @@
 ﻿import { createClient } from "@supabase/supabase-js";
 
-const CREDITS_PER_MESSAGE = 10;
+// Token-based pricing: credits per 1K tokens
+const INPUT_CREDITS_PER_1K = 1;   // 1 credit per 1000 input tokens
+const OUTPUT_CREDITS_PER_1K = 3;  // 3 credits per 1000 output tokens
 const FREE_CREDITS = 3000;
 const LOW_CREDIT_THRESHOLD = 100;
 
@@ -9,6 +11,15 @@ function getSupabaseAdmin() {
   const key = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "";
   if (!url || !key) return null;
   return createClient(url, key);
+}
+
+export function calculateCredits(usage: { prompt_tokens?: number; completion_tokens?: number; total_tokens?: number }): number {
+  var inputTokens = usage.prompt_tokens || 0;
+  var outputTokens = usage.completion_tokens || 0;
+  var inputCredits = Math.ceil((inputTokens / 1000) * INPUT_CREDITS_PER_1K);
+  var outputCredits = Math.ceil((outputTokens / 1000) * OUTPUT_CREDITS_PER_1K);
+  var total = inputCredits + outputCredits;
+  return Math.max(total, 1);
 }
 
 export async function getCredits(userId: string): Promise<number> {
@@ -83,4 +94,4 @@ export function isLowCredits(balance: number): boolean {
   return balance < LOW_CREDIT_THRESHOLD;
 }
 
-export { CREDITS_PER_MESSAGE, FREE_CREDITS, LOW_CREDIT_THRESHOLD };
+export { FREE_CREDITS, LOW_CREDIT_THRESHOLD, INPUT_CREDITS_PER_1K, OUTPUT_CREDITS_PER_1K };

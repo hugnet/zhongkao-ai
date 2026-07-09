@@ -7,7 +7,7 @@ import { generateId } from '@/lib/utils';
 import { CreditBalance } from '@/components/credits/CreditBalance';
 import { CreditRechargeModal } from '@/components/credits/CreditRechargeModal';
 
-interface ChatMsg { id: string; role: 'user' | 'assistant'; content: string; agentId?: string; }
+interface ChatMsg { id: string; role: 'user' | 'assistant'; content: string; agentId?: string; tokenInfo?: any; }
 interface HistoryItem { id: string; agent_id: string; title: string; messages?: ChatMsg[]; updated_at?: string; serverId?: string; }
 
 function isLoggedIn(): boolean {
@@ -27,6 +27,7 @@ export default function ChatPage() {
   var [loggedIn, setLoggedIn] = useState(false);
   var [histories, setHistories] = useState<HistoryItem[]>([]);
   var [currentHistoryId, setCurrentHistoryId] = useState<string | null>(null);
+  var [lastUsage, setLastUsage] = useState<any>(null);
   var messagesEndRef = useRef<HTMLDivElement>(null);
 
   useEffect(function() { messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [messages]);
@@ -110,6 +111,7 @@ export default function ChatPage() {
   function startNewChat() {
     setMessages([]);
     setCurrentHistoryId(null);
+    setLastUsage(null);
   }
 
   var agent = AGENTS.find(function(a) { return a.id === currentAgent; });
@@ -128,21 +130,18 @@ export default function ChatPage() {
     setMessages(newMsgs);
     setInput('');
     setLoading(true);
+    setLastUsage(null);
 
     try {
-      var localKey = localStorage.getItem('zhongkao_custom_api_key') || '';
-      var localProvider = localStorage.getItem('zhongkao_custom_provider') || '';
-
-      var apiUrl = '/api/chat/default';
-      var payload: any = { messages: newMsgs.map(function(m) { return { role: m.role, content: m.content }; }).slice(-20), agentId: currentAgent, userId: userId };
-
-      if (localKey && localProvider) {
-        apiUrl = '/api/chat';
-        payload = { ...payload, apiKey: localKey, providerId: localProvider };
-        delete payload.userId;
-      }
-
-      var res = await fetch(apiUrl, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+      var res = await fetch('/api/chat/default', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          messages: newMsgs.map(function(m) { return { role: m.role, content: m.content }; }).slice(-20),
+          agentId: currentAgent,
+          userId: userId,
+        }),
+      });
       var data = await res.json();
 
       if (data.error === 'INSUFFICIENT_CREDITS') {
@@ -154,8 +153,10 @@ export default function ChatPage() {
       }
 
       var reply = data.error ? ('请求出错：' + (data.error || '请稍后重试')) : (data.content || '抱歉，暂时无法回答。');
-      var allMsgs = newMsgs.concat([{ id: generateId(), role: 'assistant', content: reply, agentId: currentAgent }]);
+      var assistantMsg: ChatMsg = { id: generateId(), role: 'assistant', content: reply, agentId: currentAgent, tokenInfo: data.usage };
+      var allMsgs = newMsgs.concat([assistantMsg]);
       setMessages(allMsgs);
+      setLastUsage(data.usage || null);
       await saveHistory(allMsgs, currentAgent);
     } catch(e: any) {
       var errorMsg = '网络错误，请检查网络连接后重试。';
@@ -219,7 +220,7 @@ export default function ChatPage() {
             <div className="text-center py-16">
               <span className="text-5xl block mb-4">{subject?.icon}</span>
               <h3 className="text-lg font-semibold text-gray-900 mb-2">向 {agent?.name} 提问</h3>
-              <p className="text-sm text-gray-500 max-w-md mx-auto">每次对话消耗10积分</p>
+              <p className="text-sm text-gray-500 max-w-md mx-auto">按实际对话token消耗积分，用多少扣多少</p>
               <div className="flex flex-wrap justify-center gap-2 mt-6">
                 {(agent?.skills || []).slice(0, 6).map(function(s) {
                   return <button key={s.id} onClick={function() { setInput("老师，我有个" + s.name + "的问题：" + s.triggers[0]); }} className="text-xs bg-gray-100 text-gray-600 px-3 py-1.5 rounded-full hover:bg-gray-200">{s.name}</button>;
@@ -233,6 +234,11 @@ export default function ChatPage() {
                 {!isUser ? <span className="text-2xl shrink-0 mt-1">{subject?.icon}</span> : null}
                 <div className={"max-w-[75%] rounded-2xl px-4 py-3 text-sm leading-relaxed " + (isUser ? "bg-blue-600 text-white" : "bg-white border border-gray-200 text-gray-800")}>
                   {msg.content.split("\n").map(function(line, i) { return <p key={i} className={line.trim() ? "mb-1" : "h-2"}>{line || "\u00A0"}</p>; })}
+                  {!isUser && msg.tokenInfo && msg.tokenInfo.credits_used ? (
+                    <div className="mt-2 pt-2 border-t border-gray-100 text-[10px] text-gray-400">
+                      消耗 {msg.tokenInfo.credits_used} 积分 (输入{msg.tokenInfo.prompt_tokens} + 输出{msg.tokenInfo.completion_tokens} tokens)
+                    </div>
+                  ) : null}
                 </div>
               </div>
             );

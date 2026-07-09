@@ -15,14 +15,14 @@ export function CreditRechargeModal({ open, balance, onClose }: CreditRechargeMo
   if (!open) return null;
 
   var rechargePlans = [
-    { id: 'r1', credits: 1000, price: 9.9, label: '1000积分' },
-    { id: 'r2', credits: 5000, price: 39.9, label: '5000积分', popular: true },
-    { id: 'r3', credits: 10000, price: 69.9, label: '10000积分' },
+    { id: 'r1', credits: 10000, price: 9.9, label: '10000积分' },
+    { id: 'r2', credits: 50000, price: 39.9, label: '50000积分', popular: true },
+    { id: 'r3', credits: 200000, price: 99.9, label: '200000积分' },
   ];
 
   var subscribePlans = [
-    { id: 'monthly', name: '月卡', price: 49, period: '月', credits: '无限', features: ['无限次对话', '全科畅通', '6位AI专家'] },
-    { id: 'yearly', name: '年卡', price: 399, period: '年', credits: '无限', features: ['无限次对话', '全科畅通', '6位AI专家', '学情诊断', '定制冲刺计划'], popular: true },
+    { id: 'monthly', name: '月度会员', price: 49, period: '月', credits: 30000, features: ['赠送30000积分', '全科6位AI专家'] },
+    { id: 'yearly', name: '年度会员', price: 399, period: '年', credits: 500000, features: ['赠送500000积分', '全科6位AI专家', '学情诊断', '定制冲刺计划'], popular: true },
   ];
 
   return (
@@ -33,9 +33,9 @@ export function CreditRechargeModal({ open, balance, onClose }: CreditRechargeMo
             <h2 className="text-xl font-bold text-gray-900">积分不足</h2>
             <button onClick={onClose} className="text-gray-400 hover:text-gray-600 text-2xl">&times;</button>
           </div>
-          
+
           <p className="text-sm text-gray-500 mb-4">
-            当前余额 <span className="font-bold text-red-500">{balance}</span> 积分，每次对话消耗10积分。
+            当前余额 <span className="font-bold text-red-500">{balance}</span> 积分。
           </p>
 
           <div className="flex gap-2 mb-6 border-b border-gray-200">
@@ -57,11 +57,10 @@ export function CreditRechargeModal({ open, balance, onClose }: CreditRechargeMo
                     {plan.popular ? <span className="absolute -top-2 right-4 bg-blue-600 text-white text-[10px] px-2 py-0.5 rounded-full">推荐</span> : null}
                     <div>
                       <div className="font-bold text-gray-900">{plan.label}</div>
-                      <div className="text-xs text-gray-500">约{Math.floor(plan.credits / 10)}次对话</div>
+                      <div className="text-xs text-gray-500">按token实际消耗使用</div>
                     </div>
                     <div className="text-right">
                       <div className="font-bold text-blue-600">&yen;{plan.price}</div>
-                      <div className="text-[10px] text-gray-400">&yen;{(plan.price / plan.credits * 1000).toFixed(1)}/千积分</div>
                     </div>
                   </div>
                 );
@@ -78,6 +77,7 @@ export function CreditRechargeModal({ open, balance, onClose }: CreditRechargeMo
                       <div className="font-bold text-gray-900">{plan.name}</div>
                       <div className="font-bold text-blue-600">&yen;{plan.price}<span className="text-xs text-gray-500">/{plan.period}</span></div>
                     </div>
+                    <div className="text-sm font-bold text-blue-600 mb-2">赠送 {plan.credits.toLocaleString()} 积分</div>
                     <div className="flex flex-wrap gap-1.5">
                       {plan.features.map(function(f, i) {
                         return <span key={i} className="text-[10px] bg-gray-100 text-gray-600 px-2 py-0.5 rounded-full">&#10003; {f}</span>;
