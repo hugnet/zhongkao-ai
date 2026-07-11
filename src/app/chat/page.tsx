@@ -5,7 +5,7 @@ import { Button } from '@/components/ui/button';
 import { SUBJECTS, AGENTS } from '@/lib/constants';
 import { generateId } from '@/lib/utils';
 import { CreditRechargeModal } from '@/components/credits/CreditRechargeModal';
-import { getSupabase } from '@/lib/supabase/client';
+import { createClient } from '@supabase/supabase-js';
 
 interface ChatMsg { id: string; role: 'user' | 'assistant'; content: string; agentId?: string; tokenInfo?: any; }
 interface HistoryItem { id: string; agent_id: string; title: string; messages: ChatMsg[]; updated_at: string; }
@@ -14,6 +14,13 @@ function isLoggedIn(): boolean {
   if (typeof window === 'undefined') return false;
   var uid = localStorage.getItem('zhongkao_user_id') || '';
   return uid.length > 0 && uid.indexOf('anon_') !== 0;
+}
+
+function getSb() {
+  var url = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
+  var key = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '';
+  if (!url || !key) return null;
+  return createClient(url, key);
 }
 
 export default function ChatPage() {
@@ -39,91 +46,127 @@ export default function ChatPage() {
       var uid = localStorage.getItem('zhongkao_user_id');
       setUserId(uid);
       if (uid) {
-        loadCredits(uid);
-        loadHistories(uid);
+        initCreditsAndHistory(uid);
       }
     }
   }, []);
 
-  async function loadCredits(uid: string) {
-    var sb = getSupabase();
+  async function initCreditsAndHistory(uid: string) {
+    var sb = getSb();
     if (!sb) { setCredits(3000); return; }
+
     try {
-      var { data } = await sb.from('credits').select('balance').eq('user_id', uid).single();
-      if (data && data.balance !== undefined && data.balance !== null) {
-        setCredits(data.balance);
+      var { data: sessionData } = await sb.auth.getSession();
+      var token = sessionData?.session?.access_token;
+      if (!token) { setCredits(3000); return; }
+
+      var url = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
+
+      var creditRes = await fetch(url + '/rest/v1/credits?user_id=eq.' + uid + '&select=balance', {
+        headers: { 'Authorization': 'Bearer ' + token, 'apikey': process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '', 'Content-Type': 'application/json' },
+      });
+      if (creditRes.ok) {
+        var creditRows = await creditRes.json();
+        if (creditRows && creditRows.length > 0) {
+          setCredits(creditRows[0].balance);
+        } else {
+          await fetch(url + '/rest/v1/credits', {
+            method: 'POST',
+            headers: { 'Authorization': 'Bearer ' + token, 'apikey': process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '', 'Content-Type': 'application/json', 'Prefer': 'return=minimal' },
+            body: JSON.stringify({ user_id: uid, balance: 3000 }),
+          });
+          setCredits(3000);
+        }
       } else {
-        var { error: insertErr } = await sb.from('credits').insert({ user_id: uid, balance: 3000 });
         setCredits(3000);
+      }
+
+      var histRes = await fetch(url + '/rest/v1/chat_history?user_id=eq.' + uid + '&order=updated_at.desc&limit=50&select=id,agent_id,title,messages,updated_at', {
+        headers: { 'Authorization': 'Bearer ' + token, 'apikey': process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '', 'Content-Type': 'application/json' },
+      });
+      if (histRes.ok) {
+        var histRows = await histRes.json();
+        if (histRows) {
+          setHistories(histRows.map(function(h: any) {
+            return { id: String(h.id), agent_id: h.agent_id, title: h.title, messages: h.messages || [], updated_at: h.updated_at };
+          }));
+        }
       }
     } catch(e) { setCredits(3000); }
   }
 
-  async function deductCreditsLocal(uid: string, amount: number): Promise<number> {
-    var sb = getSupabase();
-    if (!sb) return (credits || 3000) - amount;
-    try {
-      var { data } = await sb.from('credits').select('balance').eq('user_id', uid).single();
-      var current = data?.balance ?? 3000;
-      var newBalance = current - amount;
-      if (newBalance < 0) newBalance = 0;
-      await sb.from('credits').update({ balance: newBalance, updated_at: new Date().toISOString() }).eq('user_id', uid);
-      await sb.from('credit_transactions').insert({ user_id: uid, amount: -amount, type: 'deduct', description: 'AI对话消耗' });
-      setCredits(newBalance);
-      return newBalance;
-    } catch(e) { return credits || 3000; }
-  }
-
-  async function loadHistories(uid: string) {
-    var sb = getSupabase();
+  async function doDeductCredits(uid: string, amount: number) {
+    var sb = getSb();
     if (!sb) return;
     try {
-      var { data } = await sb.from('chat_history')
-        .select('id, agent_id, title, messages, created_at, updated_at')
-        .eq('user_id', uid)
-        .order('updated_at', { ascending: false })
-        .limit(50);
-      if (data) {
-        var items: HistoryItem[] = data.map(function(h: any) {
-          return { id: String(h.id), agent_id: h.agent_id, title: h.title, messages: h.messages || [], updated_at: h.updated_at };
+      var { data: sessionData } = await sb.auth.getSession();
+      var token = sessionData?.session?.access_token;
+      if (!token) return;
+      var url = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
+
+      var creditRes = await fetch(url + '/rest/v1/credits?user_id=eq.' + uid + '&select=balance', {
+        headers: { 'Authorization': 'Bearer ' + token, 'apikey': process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '', 'Content-Type': 'application/json' },
+      });
+      if (!creditRes.ok) return;
+      var rows = await creditRes.json();
+      var current = (rows && rows.length > 0) ? rows[0].balance : 3000;
+      var newBal = Math.max(current - amount, 0);
+
+      await fetch(url + '/rest/v1/credits?user_id=eq.' + uid, {
+        method: 'PATCH',
+        headers: { 'Authorization': 'Bearer ' + token, 'apikey': process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '', 'Content-Type': 'application/json', 'Prefer': 'return=minimal' },
+        body: JSON.stringify({ balance: newBal, updated_at: new Date().toISOString() }),
+      });
+
+      await fetch(url + '/rest/v1/credit_transactions', {
+        method: 'POST',
+        headers: { 'Authorization': 'Bearer ' + token, 'apikey': process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '', 'Content-Type': 'application/json', 'Prefer': 'return=minimal' },
+        body: JSON.stringify({ user_id: uid, amount: -amount, type: 'deduct', description: 'AI对话消耗' }),
+      });
+
+      setCredits(newBal);
+    } catch(e) { console.error('deduct error:', e); }
+  }
+
+  async function doSaveHistory(uid: string, agentId: string, title: string, msgs: ChatMsg[], histId?: string) {
+    var sb = getSb();
+    if (!sb) return;
+    try {
+      var { data: sessionData } = await sb.auth.getSession();
+      var token = sessionData?.session?.access_token;
+      if (!token) return;
+      var url = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
+      var encodedMsgs = msgs.map(function(m) { return { role: m.role, content: m.content }; });
+
+      if (histId) {
+        await fetch(url + '/rest/v1/chat_history?id=eq.' + histId + '&user_id=eq.' + uid, {
+          method: 'PATCH',
+          headers: { 'Authorization': 'Bearer ' + token, 'apikey': process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '', 'Content-Type': 'application/json', 'Prefer': 'return=minimal' },
+          body: JSON.stringify({ title: title, messages: encodedMsgs, updated_at: new Date().toISOString() }),
         });
-        setHistories(items);
-      }
-    } catch(e) {}
-  }
-
-  async function saveHistoryToDB(uid: string, agentId: string, title: string, msgs: ChatMsg[], historyId?: string) {
-    var sb = getSupabase();
-    if (!sb) return;
-    var payload = { user_id: uid, agent_id: agentId, title: title, messages: msgs.map(function(m) { return { role: m.role, content: m.content }; }), updated_at: new Date().toISOString() };
-    try {
-      if (historyId) {
-        await sb.from('chat_history').update({ title: title, messages: payload.messages, updated_at: payload.updated_at }).eq('id', historyId).eq('user_id', uid);
       } else {
-        var { data } = await sb.from('chat_history').insert({ user_id: uid, agent_id: agentId, title: title, messages: payload.messages }).select('id').single();
-        if (data) {
-          setCurrentHistoryId(String(data.id));
+        var res = await fetch(url + '/rest/v1/chat_history', {
+          method: 'POST',
+          headers: { 'Authorization': 'Bearer ' + token, 'apikey': process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '', 'Content-Type': 'application/json', 'Prefer': 'return=representation' },
+          body: JSON.stringify({ user_id: uid, agent_id: agentId, title: title, messages: encodedMsgs }),
+        });
+        if (res.ok) {
+          var rows = await res.json();
+          if (rows && rows[0]) setCurrentHistoryId(String(rows[0].id));
         }
       }
-    } catch(e) {}
+      initCreditsAndHistory(uid);
+    } catch(e) { console.error('save history error:', e); }
   }
 
-  function startNewChat() {
-    setMessages([]);
-    setCurrentHistoryId(null);
-  }
-
-  function loadChat(h: HistoryItem) {
-    setMessages(h.messages);
-    setCurrentHistoryId(h.id);
-  }
+  function startNewChat() { setMessages([]); setCurrentHistoryId(null); }
+  function loadChat(h: HistoryItem) { setMessages(h.messages); setCurrentHistoryId(h.id); }
 
   var agent = AGENTS.find(function(a) { return a.id === currentAgent; });
   var subject = SUBJECTS.find(function(s) { return s.agentId === currentAgent; });
 
   async function handleSend() {
     if (!input.trim() || loading) return;
-
     if (!loggedIn) { window.location.href = '/login'; return; }
     if (credits !== null && credits < 1) { setLowBalance(0); setShowRecharge(true); return; }
 
@@ -134,51 +177,37 @@ export default function ChatPage() {
     setLoading(true);
 
     try {
-      var sb = getSupabase();
+      var sb = getSb();
       var token = '';
       if (sb) {
-        var { data: sessionData } = await sb.auth.getSession();
-        token = sessionData?.session?.access_token || '';
+        var { data: sd } = await sb.auth.getSession();
+        token = sd?.session?.access_token || '';
       }
 
       var res = await fetch('/api/chat/default', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          messages: newMsgs.map(function(m) { return { role: m.role, content: m.content }; }).slice(-20),
-          agentId: currentAgent,
-          userId: userId,
-          accessToken: token,
-        }),
+        body: JSON.stringify({ messages: newMsgs.map(function(m) { return { role: m.role, content: m.content }; }).slice(-20), agentId: currentAgent, userId: userId, accessToken: token }),
       });
       var data = await res.json();
 
-      if (data.error === 'INSUFFICIENT_CREDITS') {
-        setLowBalance(data.credits || 0);
-        setShowRecharge(true);
-        setLoading(false);
-        setMessages(messages);
-        return;
-      }
+      if (data.error === 'INSUFFICIENT_CREDITS') { setLowBalance(data.credits || 0); setShowRecharge(true); setLoading(false); setMessages(messages); return; }
 
-      var reply = data.error ? ('请求出错：' + (data.error || '请稍后重试')) : (data.content || '抱歉，暂时无法回答。');
+      var reply = data.error ? ('请求出错：' + data.error) : (data.content || '抱歉，暂时无法回答。');
       var assistantMsg: ChatMsg = { id: generateId(), role: 'assistant', content: reply, agentId: currentAgent, tokenInfo: data.usage };
       var allMsgs = newMsgs.concat([assistantMsg]);
       setMessages(allMsgs);
 
       if (data.usage && data.usage.credits_used && userId) {
-        await deductCreditsLocal(userId, data.usage.credits_used);
+        await doDeductCredits(userId, data.usage.credits_used);
       }
 
       var title = (newMsgs[0]?.content || '新对话').slice(0, 30);
       if (userId) {
-        await saveHistoryToDB(userId, currentAgent, title, allMsgs, currentHistoryId || undefined);
-        loadHistories(userId);
+        await doSaveHistory(userId, currentAgent, title, allMsgs, currentHistoryId || undefined);
       }
     } catch(e: any) {
-      var errorMsg = '网络错误：' + (e.message || '请检查网络');
-      var allMsgs = newMsgs.concat([{ id: generateId(), role: 'assistant', content: errorMsg, agentId: currentAgent }]);
-      setMessages(allMsgs);
+      setMessages(newMsgs.concat([{ id: generateId(), role: 'assistant', content: '网络错误：' + (e.message || '请检查网络'), agentId: currentAgent }]));
     }
     setLoading(false);
   }
@@ -202,18 +231,13 @@ export default function ChatPage() {
         <div className="flex-1 overflow-hidden flex flex-col px-3 pt-2 border-t border-gray-100">
           <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2 px-1">历史对话</h3>
           <div className="flex-1 overflow-y-auto space-y-0.5">
-            {histories.length === 0 ? (
-              <p className="text-xs text-gray-300 px-1 py-4 text-center">暂无历史对话</p>
-            ) : histories.map(function(h) {
+            {histories.length === 0 ? <p className="text-xs text-gray-300 px-1 py-4 text-center">暂无历史对话</p> : histories.map(function(h) {
               var a = AGENTS.find(function(ag) { return ag.id === h.agent_id; });
               var s = SUBJECTS.find(function(sub) { return sub.agentId === h.agent_id; });
               return (
                 <button key={h.id} onClick={function() { loadChat(h); }}
                   className={"w-full text-left px-3 py-2 rounded-lg text-xs transition-colors " + (currentHistoryId === h.id ? "bg-blue-50 text-blue-700" : "text-gray-600 hover:bg-gray-50")}>
-                  <div className="flex items-center gap-1.5">
-                    <span className="text-sm shrink-0">{s?.icon || '💬'}</span>
-                    <span className="truncate font-medium">{h.title}</span>
-                  </div>
+                  <div className="flex items-center gap-1.5"><span className="text-sm shrink-0">{s?.icon || '💬'}</span><span className="truncate font-medium">{h.title}</span></div>
                   <div className="text-[10px] text-gray-400 mt-0.5 pl-5">{a?.name || ''}</div>
                 </button>
               );
@@ -229,14 +253,10 @@ export default function ChatPage() {
           <a href="/settings" className="block text-xs text-gray-400 hover:text-blue-600 px-2">&#9881; 设置</a>
         </div>
       </div>
-
       <div className="flex-1 flex flex-col">
         <div className="flex items-center gap-3 mb-4 pb-4 border-b border-gray-200 px-6 pt-4">
           <span className="text-3xl">{subject?.icon}</span>
-          <div className="flex-1">
-            <h2 className="font-bold text-gray-900">{agent?.name} · {agent?.title}</h2>
-            <p className="text-sm text-gray-500">{agent?.description.slice(0, 60)}..</p>
-          </div>
+          <div className="flex-1"><h2 className="font-bold text-gray-900">{agent?.name} · {agent?.title}</h2><p className="text-sm text-gray-500">{agent?.description.slice(0, 60)}..</p></div>
         </div>
         <div className="flex-1 overflow-y-auto chat-messages space-y-4 pr-6 pl-6">
           {messages.length === 0 ? (
@@ -258,9 +278,7 @@ export default function ChatPage() {
                 <div className={"max-w-[75%] rounded-2xl px-4 py-3 text-sm leading-relaxed " + (isUser ? "bg-blue-600 text-white" : "bg-white border border-gray-200 text-gray-800")}>
                   {msg.content.split("\n").map(function(line, i) { return <p key={i} className={line.trim() ? "mb-1" : "h-2"}>{line || "\u00A0"}</p>; })}
                   {!isUser && msg.tokenInfo && msg.tokenInfo.credits_used ? (
-                    <div className="mt-2 pt-2 border-t border-gray-100 text-[10px] text-gray-400">
-                      消耗 {msg.tokenInfo.credits_used} 积分 (输入{msg.tokenInfo.prompt_tokens} + 输出{msg.tokenInfo.completion_tokens} tokens)
-                    </div>
+                    <div className="mt-2 pt-2 border-t border-gray-100 text-[10px] text-gray-400">消耗 {msg.tokenInfo.credits_used} 积分 (输入{msg.tokenInfo.prompt_tokens} + 输出{msg.tokenInfo.completion_tokens} tokens)</div>
                   ) : null}
                 </div>
               </div>
@@ -280,20 +298,10 @@ export default function ChatPage() {
         </div>
         <div className="mt-4 pt-4 border-t border-gray-200 px-6 pb-4">
           <div className="flex gap-3">
-            <input value={input} onChange={function(e) { setInput(e.target.value); }}
-              onKeyDown={function(e) { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(); } }}
-              placeholder={loggedIn ? ("向" + (agent?.name || "老师") + "提问...") : "请先登录后使用AI对话"}
-              className="flex-1 px-4 py-2.5 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
-              disabled={loading} />
-            <Button variant="primary" onClick={handleSend} disabled={loading || !input.trim()}>
-              {loading ? "思考中..." : "发送"}
-            </Button>
+            <input value={input} onChange={function(e) { setInput(e.target.value); }} onKeyDown={function(e) { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(); } }} placeholder={loggedIn ? ("向" + (agent?.name || "老师") + "提问...") : "请先登录后使用AI对话"} className="flex-1 px-4 py-2.5 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white" disabled={loading} />
+            <Button variant="primary" onClick={handleSend} disabled={loading || !input.trim()}>{loading ? "思考中..." : "发送"}</Button>
           </div>
-          {!loggedIn ? (
-            <p className="text-xs text-gray-400 mt-2 text-center">
-              <a href="/login" className="text-blue-500 hover:underline">登录</a> 后即可开始AI对话，注册赠送3000积分
-            </p>
-          ) : null}
+          {!loggedIn ? <p className="text-xs text-gray-400 mt-2 text-center"><a href="/login" className="text-blue-500 hover:underline">登录</a> 后即可开始AI对话，注册赠送3000积分</p> : null}
         </div>
       </div>
       <CreditRechargeModal open={showRecharge} balance={lowBalance} onClose={function() { setShowRecharge(false); }} />
