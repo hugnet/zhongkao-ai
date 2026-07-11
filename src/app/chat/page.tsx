@@ -5,7 +5,7 @@ import { Button } from '@/components/ui/button';
 import { SUBJECTS, AGENTS } from '@/lib/constants';
 import { generateId } from '@/lib/utils';
 import { CreditRechargeModal } from '@/components/credits/CreditRechargeModal';
-import { createClient } from '@supabase/supabase-js';
+import { getSupabase } from '@/lib/supabase/client';
 
 interface ChatMsg { id: string; role: 'user' | 'assistant'; content: string; agentId?: string; tokenInfo?: any; }
 interface HistoryItem { id: string; agent_id: string; title: string; messages: ChatMsg[]; updated_at: string; }
@@ -16,11 +16,13 @@ function isLoggedIn(): boolean {
   return uid.length > 0 && uid.indexOf('anon_') !== 0;
 }
 
-function getSb() {
-  var url = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
-  var key = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '';
-  if (!url || !key) return null;
-  return createClient(url, key);
+async function getToken(): Promise<string> {
+  var sb = getSupabase();
+  if (!sb) return '';
+  try {
+    var { data } = await sb.auth.getSession();
+    return data?.session?.access_token || '';
+  } catch(e) { return ''; }
 }
 
 export default function ChatPage() {
@@ -45,115 +47,66 @@ export default function ChatPage() {
     if (hasAcc) {
       var uid = localStorage.getItem('zhongkao_user_id');
       setUserId(uid);
-      if (uid) {
-        initCreditsAndHistory(uid);
-      }
+      if (uid) initCreditsAndHistory(uid);
     }
   }, []);
 
+  async function restHeaders(): Promise<Record<string, string>> {
+    var token = await getToken();
+    var anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '';
+    return { 'Authorization': 'Bearer ' + token, 'apikey': anonKey, 'Content-Type': 'application/json' };
+  }
+
   async function initCreditsAndHistory(uid: string) {
-    var sb = getSb();
-    if (!sb) { setCredits(3000); return; }
-
+    var url = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
+    if (!url) { setCredits(3000); return; }
     try {
-      var { data: sessionData } = await sb.auth.getSession();
-      var token = sessionData?.session?.access_token;
-      if (!token) { setCredits(3000); return; }
-
-      var url = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
-
-      var creditRes = await fetch(url + '/rest/v1/credits?user_id=eq.' + uid + '&select=balance', {
-        headers: { 'Authorization': 'Bearer ' + token, 'apikey': process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '', 'Content-Type': 'application/json' },
-      });
+      var headers = await restHeaders();
+      var creditRes = await fetch(url + '/rest/v1/credits?user_id=eq.' + uid + '&select=balance', { headers: headers });
       if (creditRes.ok) {
-        var creditRows = await creditRes.json();
-        if (creditRows && creditRows.length > 0) {
-          setCredits(creditRows[0].balance);
+        var rows = await creditRes.json();
+        if (rows && rows.length > 0) {
+          setCredits(rows[0].balance);
         } else {
-          await fetch(url + '/rest/v1/credits', {
-            method: 'POST',
-            headers: { 'Authorization': 'Bearer ' + token, 'apikey': process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '', 'Content-Type': 'application/json', 'Prefer': 'return=minimal' },
-            body: JSON.stringify({ user_id: uid, balance: 3000 }),
-          });
+          await fetch(url + '/rest/v1/credits', { method: 'POST', headers: { ...headers, 'Prefer': 'return=minimal' }, body: JSON.stringify({ user_id: uid, balance: 3000 }) });
           setCredits(3000);
         }
-      } else {
-        setCredits(3000);
-      }
-
-      var histRes = await fetch(url + '/rest/v1/chat_history?user_id=eq.' + uid + '&order=updated_at.desc&limit=50&select=id,agent_id,title,messages,updated_at', {
-        headers: { 'Authorization': 'Bearer ' + token, 'apikey': process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '', 'Content-Type': 'application/json' },
-      });
+      } else { setCredits(3000); }
+      var histRes = await fetch(url + '/rest/v1/chat_history?user_id=eq.' + uid + '&order=updated_at.desc&limit=50&select=id,agent_id,title,messages,updated_at', { headers: headers });
       if (histRes.ok) {
-        var histRows = await histRes.json();
-        if (histRows) {
-          setHistories(histRows.map(function(h: any) {
-            return { id: String(h.id), agent_id: h.agent_id, title: h.title, messages: h.messages || [], updated_at: h.updated_at };
-          }));
-        }
+        var hrows = await histRes.json();
+        if (hrows) setHistories(hrows.map(function(h: any) { return { id: String(h.id), agent_id: h.agent_id, title: h.title, messages: h.messages || [], updated_at: h.updated_at }; }));
       }
     } catch(e) { setCredits(3000); }
   }
 
   async function doDeductCredits(uid: string, amount: number) {
-    var sb = getSb();
-    if (!sb) return;
+    var url = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
+    if (!url) return;
     try {
-      var { data: sessionData } = await sb.auth.getSession();
-      var token = sessionData?.session?.access_token;
-      if (!token) return;
-      var url = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
-
-      var creditRes = await fetch(url + '/rest/v1/credits?user_id=eq.' + uid + '&select=balance', {
-        headers: { 'Authorization': 'Bearer ' + token, 'apikey': process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '', 'Content-Type': 'application/json' },
-      });
-      if (!creditRes.ok) return;
-      var rows = await creditRes.json();
+      var headers = await restHeaders();
+      var res = await fetch(url + '/rest/v1/credits?user_id=eq.' + uid + '&select=balance', { headers });
+      if (!res.ok) return;
+      var rows = await res.json();
       var current = (rows && rows.length > 0) ? rows[0].balance : 3000;
       var newBal = Math.max(current - amount, 0);
-
-      await fetch(url + '/rest/v1/credits?user_id=eq.' + uid, {
-        method: 'PATCH',
-        headers: { 'Authorization': 'Bearer ' + token, 'apikey': process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '', 'Content-Type': 'application/json', 'Prefer': 'return=minimal' },
-        body: JSON.stringify({ balance: newBal, updated_at: new Date().toISOString() }),
-      });
-
-      await fetch(url + '/rest/v1/credit_transactions', {
-        method: 'POST',
-        headers: { 'Authorization': 'Bearer ' + token, 'apikey': process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '', 'Content-Type': 'application/json', 'Prefer': 'return=minimal' },
-        body: JSON.stringify({ user_id: uid, amount: -amount, type: 'deduct', description: 'AI对话消耗' }),
-      });
-
+      await fetch(url + '/rest/v1/credits?user_id=eq.' + uid, { method: 'PATCH', headers: { ...headers, 'Prefer': 'return=minimal' }, body: JSON.stringify({ balance: newBal, updated_at: new Date().toISOString() }) });
+      await fetch(url + '/rest/v1/credit_transactions', { method: 'POST', headers: { ...headers, 'Prefer': 'return=minimal' }, body: JSON.stringify({ user_id: uid, amount: -amount, type: 'deduct', description: 'AI对话消耗' }) });
       setCredits(newBal);
     } catch(e) { console.error('deduct error:', e); }
   }
 
   async function doSaveHistory(uid: string, agentId: string, title: string, msgs: ChatMsg[], histId?: string) {
-    var sb = getSb();
-    if (!sb) return;
+    var url = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
+    if (!url) return;
     try {
-      var { data: sessionData } = await sb.auth.getSession();
-      var token = sessionData?.session?.access_token;
-      if (!token) return;
-      var url = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
+      var headers = await restHeaders();
       var encodedMsgs = msgs.map(function(m) { return { role: m.role, content: m.content }; });
-
       if (histId) {
-        await fetch(url + '/rest/v1/chat_history?id=eq.' + histId + '&user_id=eq.' + uid, {
-          method: 'PATCH',
-          headers: { 'Authorization': 'Bearer ' + token, 'apikey': process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '', 'Content-Type': 'application/json', 'Prefer': 'return=minimal' },
-          body: JSON.stringify({ title: title, messages: encodedMsgs, updated_at: new Date().toISOString() }),
-        });
+        await fetch(url + '/rest/v1/chat_history?id=eq.' + histId + '&user_id=eq.' + uid, { method: 'PATCH', headers: { ...headers, 'Prefer': 'return=minimal' }, body: JSON.stringify({ title, messages: encodedMsgs, updated_at: new Date().toISOString() }) });
       } else {
-        var res = await fetch(url + '/rest/v1/chat_history', {
-          method: 'POST',
-          headers: { 'Authorization': 'Bearer ' + token, 'apikey': process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '', 'Content-Type': 'application/json', 'Prefer': 'return=representation' },
-          body: JSON.stringify({ user_id: uid, agent_id: agentId, title: title, messages: encodedMsgs }),
-        });
-        if (res.ok) {
-          var rows = await res.json();
-          if (rows && rows[0]) setCurrentHistoryId(String(rows[0].id));
-        }
+        var res = await fetch(url + '/rest/v1/chat_history', { method: 'POST', headers: { ...headers, 'Prefer': 'return=representation' }, body: JSON.stringify({ user_id: uid, agent_id: agentId, title, messages: encodedMsgs }) });
+        if (res.ok) { var rows = await res.json(); if (rows && rows[0]) setCurrentHistoryId(String(rows[0].id)); }
       }
       initCreditsAndHistory(uid);
     } catch(e) { console.error('save history error:', e); }
@@ -177,13 +130,7 @@ export default function ChatPage() {
     setLoading(true);
 
     try {
-      var sb = getSb();
-      var token = '';
-      if (sb) {
-        var { data: sd } = await sb.auth.getSession();
-        token = sd?.session?.access_token || '';
-      }
-
+      var token = await getToken();
       var res = await fetch('/api/chat/default', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -198,14 +145,10 @@ export default function ChatPage() {
       var allMsgs = newMsgs.concat([assistantMsg]);
       setMessages(allMsgs);
 
-      if (data.usage && data.usage.credits_used && userId) {
-        await doDeductCredits(userId, data.usage.credits_used);
-      }
+      if (data.usage && data.usage.credits_used && userId) await doDeductCredits(userId, data.usage.credits_used);
 
       var title = (newMsgs[0]?.content || '新对话').slice(0, 30);
-      if (userId) {
-        await doSaveHistory(userId, currentAgent, title, allMsgs, currentHistoryId || undefined);
-      }
+      if (userId) await doSaveHistory(userId, currentAgent, title, allMsgs, currentHistoryId || undefined);
     } catch(e: any) {
       setMessages(newMsgs.concat([{ id: generateId(), role: 'assistant', content: '网络错误：' + (e.message || '请检查网络'), agentId: currentAgent }]));
     }

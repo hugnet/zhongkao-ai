@@ -14,21 +14,25 @@ export function CreditBalance({ userId, onLowCredits }: CreditBalanceProps) {
     if (!userId) return;
     var sb = getSupabase();
     if (!sb) { setBalance(3000); return; }
-    sb.from('credits').select('balance').eq('user_id', userId).single()
-      .then(function(result: any) {
-        var b = result.data?.balance;
-        if (b !== undefined && b !== null) {
-          setBalance(b);
-          if (b < 100 && onLowCredits) onLowCredits(b);
-        } else {
-          setBalance(3000);
-        }
+    sb.auth.getSession().then(function(result: any) {
+      var token = result.data?.session?.access_token;
+      if (!token) { setBalance(3000); return; }
+      var url = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
+      var anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '';
+      return fetch(url + '/rest/v1/credits?user_id=eq.' + userId + '&select=balance', {
+        headers: { 'Authorization': 'Bearer ' + token, 'apikey': anonKey, 'Content-Type': 'application/json' },
+      });
+    }).then(function(r: any) { return r ? r.json() : null; })
+      .then(function(data: any) {
+        if (data && data[0]) {
+          setBalance(data[0].balance);
+          if (data[0].balance < 100 && onLowCredits) onLowCredits(data[0].balance);
+        } else { setBalance(3000); }
       })
       .catch(function() { setBalance(3000); });
   }, [userId]);
 
   if (!userId || balance === null) return null;
-
   var color = balance < 100 ? 'text-red-500' : balance < 500 ? 'text-yellow-500' : 'text-green-600';
   var bgColor = balance < 100 ? 'bg-red-50 border-red-200' : balance < 500 ? 'bg-yellow-50 border-yellow-200' : 'bg-green-50 border-green-200';
 
