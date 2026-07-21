@@ -1,4 +1,4 @@
-import { NextRequest, NextResponse } from 'next/server';
+ï»¿import { NextRequest, NextResponse } from 'next/server';
 import { skillEngine } from '@/lib/skills/skillEngine';
 import { getCredits, deductCredits, calculateCredits, getUserPlan, FREE_DAILY_LIMIT } from '@/lib/credits';
 import { getProvider, buildChatURL } from '@/lib/ai/providers';
@@ -25,31 +25,31 @@ export async function POST(req: NextRequest) {
     var apiKey = getDefaultApiKey();
     if (!apiKey) {
       console.error('[chat/default] DEFAULT_API_KEY not set');
-      return NextResponse.json({ error: '·şÎñÎ´ÅäÖÃ£¬ÇëÁªÏµ¹ÜÀíÔ±' }, { status: 503 });
+      return NextResponse.json({ error: 'æœåŠ¡æœªé…ç½®ï¼Œè¯·è”ç³»ç®¡ç†å‘˜' }, { status: 503 });
     }
 
     var provider = getProvider(DEFAULT_PROVIDER_ID);
     if (!provider) {
-      return NextResponse.json({ error: 'ÅäÖÃ´íÎó' }, { status: 500 });
+      return NextResponse.json({ error: 'é…ç½®é”™è¯¯' }, { status: 500 });
     }
 
     if (!userId || !accessToken) {
-      return NextResponse.json({ error: 'ÇëÏÈµÇÂ¼ºóÔÙÊ¹ÓÃ' }, { status: 401 });
+      return NextResponse.json({ error: 'è¯·å…ˆç™»å½•åå†ä½¿ç”¨' }, { status: 401 });
     }
 
     var sb = getSupabase();
     if (sb && accessToken) {
       var { data: userData } = await sb.auth.getUser(accessToken);
       if (!userData?.user?.email_confirmed_at) {
-        return NextResponse.json({ error: 'ÇëÏÈµ½ÓÊÏäÈ·ÈÏºóÔÙÊ¹ÓÃ' }, { status: 403 });
+        return NextResponse.json({ error: 'è¯·å…ˆåˆ°é‚®ç®±ç¡®è®¤åå†ä½¿ç”¨' }, { status: 403 });
       }
     }
 
     var userPlan = await getUserPlan(userId, accessToken);
     var isPremium = userPlan === 'monthly' || userPlan === 'yearly';
 
-    if (!isPremium) {
-      var { count: dailyCount } = await sb!.from('credit_transactions')
+    if (!isPremium && sb) {
+      var { count: dailyCount } = await sb.from('credit_transactions')
         .select('*', { count: 'exact', head: true })
         .eq('user_id', userId)
         .eq('type', 'deduct')
@@ -58,7 +58,7 @@ export async function POST(req: NextRequest) {
       if (dailyCount && dailyCount >= FREE_DAILY_LIMIT) {
         return NextResponse.json({
           error: 'DAILY_LIMIT_EXCEEDED',
-          message: 'Ãâ·ÑÓÃ»§Ã¿ÈÕÌáÎÊÉÏÏŞÎª' + FREE_DAILY_LIMIT + '´Î£¬Éı¼¶»áÔ±½âËøÎŞÏŞÌáÎÊ',
+          message: 'å…è´¹ç”¨æˆ·æ¯æ—¥æé—®ä¸Šé™ä¸º' + FREE_DAILY_LIMIT + 'æ¬¡ï¼Œå‡çº§ä¼šå‘˜è§£é”æ— é™æé—®',
           plan: userPlan,
           daily_count: dailyCount,
           daily_limit: FREE_DAILY_LIMIT,
@@ -98,7 +98,7 @@ export async function POST(req: NextRequest) {
     if (!res.ok) {
       var errText = await res.text().catch(function() { return ''; });
       console.error('[chat/default] API error:', res.status, errText.slice(0, 500));
-      var errMsg = 'AI·şÎñÔİÊ±²»¿ÉÓÃ';
+      var errMsg = 'AIæœåŠ¡æš‚æ—¶ä¸å¯ç”¨';
       try {
         var errJson = JSON.parse(errText);
         if (errJson.error) {
@@ -116,19 +116,19 @@ export async function POST(req: NextRequest) {
       content = data.choices[0].message.content || '';
     }
     if (!content) {
-      content = '±§Ç¸£¬ÔİÊ±ÎŞ·¨»Ø´ğ¡£';
+      content = 'æŠ±æ­‰ï¼Œæš‚æ—¶æ— æ³•å›ç­”ã€‚';
     }
 
     var usage = data.usage || {};
     var creditsUsed = calculateCredits(usage);
-    var description = 'AI¶Ô»° (ÊäÈë' + (usage.prompt_tokens || 0) + ' + Êä³ö' + (usage.completion_tokens || 0) + ' tokens)';
+    var description = 'AIå¯¹è¯ (è¾“å…¥' + (usage.prompt_tokens || 0) + ' + è¾“å‡º' + (usage.completion_tokens || 0) + ' tokens)';
 
     var remainingCredits = credits;
     if (!isPremium) {
       var deductResult = await deductCredits(userId, creditsUsed, description, accessToken);
       remainingCredits = deductResult.success ? deductResult.balance : credits;
     } else {
-      await deductCredits(userId, creditsUsed, '[»áÔ±] ' + description, accessToken);
+      await deductCredits(userId, creditsUsed, '[ä¼šå‘˜] ' + description, accessToken);
       remainingCredits = credits - creditsUsed;
     }
 
@@ -145,6 +145,6 @@ export async function POST(req: NextRequest) {
     });
   } catch (err: any) {
     console.error('[chat/default] Exception:', err.message, err.stack);
-    return NextResponse.json({ error: '·şÎñÔİÊ±²»¿ÉÓÃ£º' + (err.message || 'Î´Öª´íÎó') }, { status: 500 });
+    return NextResponse.json({ error: 'æœåŠ¡æš‚æ—¶ä¸å¯ç”¨ï¼š' + (err.message || 'æœªçŸ¥é”™è¯¯') }, { status: 500 });
   }
 }
