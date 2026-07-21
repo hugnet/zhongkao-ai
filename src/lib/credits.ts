@@ -108,7 +108,8 @@ export async function getCredits(userId: string, accessToken: string): Promise<n
 export async function getUserPlan(userId: string, accessToken: string): Promise<string> {
   if (!accessToken || !SUPABASE_URL) return "free";
   try {
-    var plan = await restRpc("get_user_plan", { p_user_id: userId }, accessToken);
+    var raw = await restRpc("get_user_plan", { p_user_id: userId }, accessToken);
+    var plan = Array.isArray(raw) ? raw[0] : raw;
     return plan || "free";
   } catch(e) {
     return "free";
@@ -125,12 +126,13 @@ export async function deductCredits(userId: string, amount: number, description:
       p_description: description,
     }, accessToken);
 
-    if (result && result.success) {
-      return { success: true, balance: result.new_balance };
+    var row = Array.isArray(result) ? result[0] : result;
+    if (row && row.success) {
+      return { success: true, balance: row.new_balance };
     }
 
-    if (result && result.error) {
-      return { success: false, balance: result.new_balance || 0, error: result.error };
+    if (row && row.error) {
+      return { success: false, balance: row.new_balance || 0, error: row.error };
     }
 
     var rows = await restQuery("credits", "?user_id=eq." + userId + "&select=balance", accessToken);
