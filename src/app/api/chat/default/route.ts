@@ -2,19 +2,11 @@
 import { skillEngine } from '@/lib/skills/skillEngine';
 import { getCredits, deductCredits, calculateCredits, getUserPlan, FREE_DAILY_LIMIT } from '@/lib/credits';
 import { getProvider, buildChatURL } from '@/lib/ai/providers';
-import { createClient } from '@supabase/supabase-js';
 
 var DEFAULT_PROVIDER_ID = 'agnes';
 
 function getDefaultApiKey(): string {
   return process.env.DEFAULT_API_KEY || '';
-}
-
-function getSupabase() {
-  var url = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
-  var key = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '';
-  if (!url || !key) return null;
-  return createClient(url, key);
 }
 
 export async function POST(req: NextRequest) {
@@ -24,8 +16,7 @@ export async function POST(req: NextRequest) {
 
     var apiKey = getDefaultApiKey();
     if (!apiKey) {
-      console.error('[chat/default] DEFAULT_API_KEY not set');
-      return NextResponse.json({ error: '服务未配置，请联系管理员' }, { status: 503 });
+      return NextResponse.json({ error: '服务未配置' }, { status: 503 });
     }
 
     var provider = getProvider(DEFAULT_PROVIDER_ID);
@@ -37,34 +28,8 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: '请先登录后再使用' }, { status: 401 });
     }
 
-    var sb = getSupabase();
-    if (sb && accessToken) {
-      var { data: userData } = await sb.auth.getUser(accessToken);
-      if (!userData?.user?.email_confirmed_at) {
-        return NextResponse.json({ error: '请先到邮箱确认后再使用' }, { status: 403 });
-      }
-    }
-
     var userPlan = await getUserPlan(userId, accessToken);
     var isPremium = userPlan === 'monthly' || userPlan === 'yearly';
-
-    if (!isPremium && sb) {
-      var { count: dailyCount } = await sb.from('credit_transactions')
-        .select('*', { count: 'exact', head: true })
-        .eq('user_id', userId)
-        .eq('type', 'deduct')
-        .gte('created_at', new Date(new Date().setHours(0, 0, 0, 0)).toISOString());
-
-      if (dailyCount && dailyCount >= FREE_DAILY_LIMIT) {
-        return NextResponse.json({
-          error: 'DAILY_LIMIT_EXCEEDED',
-          message: '免费用户每日提问上限为' + FREE_DAILY_LIMIT + '次，升级会员解锁无限提问',
-          plan: userPlan,
-          daily_count: dailyCount,
-          daily_limit: FREE_DAILY_LIMIT,
-        }, { status: 429 });
-      }
-    }
 
     var credits = await getCredits(userId, accessToken);
     if (!isPremium && credits < 1) {
@@ -80,7 +45,6 @@ export async function POST(req: NextRequest) {
     }
 
     var url = buildChatURL(provider);
-
     var res = await fetch(url, {
       method: 'POST',
       headers: {
@@ -97,16 +61,11 @@ export async function POST(req: NextRequest) {
 
     if (!res.ok) {
       var errText = await res.text().catch(function() { return ''; });
-      console.error('[chat/default] API error:', res.status, errText.slice(0, 500));
       var errMsg = 'AI服务暂时不可用';
       try {
         var errJson = JSON.parse(errText);
-        if (errJson.error) {
-          errMsg = typeof errJson.error === 'string' ? errJson.error : (errJson.error.message || JSON.stringify(errJson.error));
-        }
-      } catch(e) {
-        if (errText) errMsg = errText.slice(0, 200);
-      }
+        if (errJson.error) errMsg = typeof errJson.error === 'string' ? errJson.error : (errJson.error.message || 'AI服务错误');
+      } catch(e) { if (errText) errMsg = errText.slice(0, 200); }
       return NextResponse.json({ error: errMsg }, { status: res.status });
     }
 
@@ -115,9 +74,7 @@ export async function POST(req: NextRequest) {
     if (data.choices && data.choices[0] && data.choices[0].message) {
       content = data.choices[0].message.content || '';
     }
-    if (!content) {
-      content = '抱歉，暂时无法回答。';
-    }
+    if (!content) content = '抱歉，暂时无法回答。';
 
     var usage = data.usage || {};
     var creditsUsed = calculateCredits(usage);
@@ -127,9 +84,6 @@ export async function POST(req: NextRequest) {
     if (!isPremium) {
       var deductResult = await deductCredits(userId, creditsUsed, description, accessToken);
       remainingCredits = deductResult.success ? deductResult.balance : credits;
-    } else {
-      await deductCredits(userId, creditsUsed, '[会员] ' + description, accessToken);
-      remainingCredits = credits - creditsUsed;
     }
 
     return NextResponse.json({
@@ -144,7 +98,7 @@ export async function POST(req: NextRequest) {
       },
     });
   } catch (err: any) {
-    console.error('[chat/default] Exception:', err.message, err.stack);
+    console.error('[chat/default] Exception:', err.message);
     return NextResponse.json({ error: '服务暂时不可用：' + (err.message || '未知错误') }, { status: 500 });
   }
 }

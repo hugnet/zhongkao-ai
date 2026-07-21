@@ -7,155 +7,89 @@ const FREE_DAILY_LIMIT = 30;
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL || "";
 const SUPABASE_ANON_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "";
 
-async function restQuery(table: string, query: string, accessToken: string) {
-  var url = SUPABASE_URL + "/rest/v1/" + table + query;
-  var res = await fetch(url, {
-    headers: {
-      "Authorization": "Bearer " + accessToken,
-      "apikey": SUPABASE_ANON_KEY,
-      "Content-Type": "application/json",
-    },
-  });
-  if (!res.ok) {
-    var errText = await res.text().catch(function() { return ""; });
-    console.error("[credits] REST error:", res.status, errText.slice(0, 300));
-    return null;
-  }
-  return res.json();
+function headers(token: string) {
+  return {
+    "Authorization": "Bearer " + token,
+    "apikey": SUPABASE_ANON_KEY,
+    "Content-Type": "application/json",
+    "Prefer": "return=representation",
+  };
 }
 
-async function restInsert(table: string, body: any, accessToken: string) {
-  var url = SUPABASE_URL + "/rest/v1/" + table;
-  var res = await fetch(url, {
-    method: "POST",
-    headers: {
-      "Authorization": "Bearer " + accessToken,
-      "apikey": SUPABASE_ANON_KEY,
-      "Content-Type": "application/json",
-      "Prefer": "return=representation",
-    },
-    body: JSON.stringify(body),
-  });
-  if (!res.ok) {
-    var errText = await res.text().catch(function() { return ""; });
-    console.error("[credits] REST insert error:", res.status, errText.slice(0, 300));
-    return null;
-  }
-  return res.json();
-}
-
-async function restUpdate(table: string, query: string, body: any, accessToken: string): Promise<{ok:boolean;rows:any[]}> {
-  var url = SUPABASE_URL + "/rest/v1/" + table + query;
-  var res = await fetch(url, {
-    method: "PATCH",
-    headers: {
-      "Authorization": "Bearer " + accessToken,
-      "apikey": SUPABASE_ANON_KEY,
-      "Content-Type": "application/json",
-      "Prefer": "return=representation",
-    },
-    body: JSON.stringify(body),
-  });
-  if (!res.ok) {
-    var errText = await res.text().catch(function() { return ""; });
-    console.error("[credits] REST update error:", res.status, errText.slice(0, 300));
-    return {ok:false,rows:[]};
-  }
-  try{var r=await res.json();return{ok:true,rows:Array.isArray(r)?r:[]}}catch(e){return{ok:true,rows:[]}}
-}
-
-async function restRpc(functionName: string, args: any, accessToken: string): Promise<any> {
-  var url = SUPABASE_URL + "/rest/v1/rpc/" + functionName;
-  var res = await fetch(url, {
-    method: "POST",
-    headers: {
-      "Authorization": "Bearer " + accessToken,
-      "apikey": SUPABASE_ANON_KEY,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify(args),
-  });
-  if (!res.ok) {
-    var errText = await res.text().catch(function() { return ""; });
-    console.error("[credits] RPC error:", res.status, errText.slice(0, 300));
-    return null;
-  }
-  return res.json();
-}
-
-export function calculateCredits(usage: { prompt_tokens?: number; completion_tokens?: number; total_tokens?: number }): number {
-  var inputTokens = usage.prompt_tokens || 0;
-  var outputTokens = usage.completion_tokens || 0;
-  var inputCredits = Math.ceil((inputTokens / 1000) * INPUT_CREDITS_PER_1K);
-  var outputCredits = Math.ceil((outputTokens / 1000) * OUTPUT_CREDITS_PER_1K);
-  return Math.max(inputCredits + outputCredits, 1);
+export function calculateCredits(usage: { prompt_tokens?: number; completion_tokens?: number }): number {
+  var input = usage.prompt_tokens || 0;
+  var output = usage.completion_tokens || 0;
+  return Math.max(Math.ceil((input / 1000) * INPUT_CREDITS_PER_1K) + Math.ceil((output / 1000) * OUTPUT_CREDITS_PER_1K), 1);
 }
 
 export async function getCredits(userId: string, accessToken: string): Promise<number> {
   if (!accessToken || !SUPABASE_URL) return FREE_CREDITS;
   try {
-    var rows = await restQuery("credits", "?user_id=eq." + userId + "&select=balance", accessToken);
-    if (rows && rows.length > 0 && rows[0].balance !== undefined && rows[0].balance !== null) {
-      return rows[0].balance;
+    var res = await fetch(SUPABASE_URL + "/rest/v1/credits?user_id=eq." + userId + "&select=balance", { headers: headers(accessToken) });
+    if (res.ok) {
+      var rows = await res.json();
+      if (rows && rows.length > 0 && rows[0].balance != null) return rows[0].balance;
     }
-    await restInsert("credits", { user_id: userId, balance: FREE_CREDITS }, accessToken);
+    // 创建积分记录
+    await fetch(SUPABASE_URL + "/rest/v1/credits", {
+      method: "POST",
+      headers: headers(accessToken),
+      body: JSON.stringify({ user_id: userId, balance: FREE_CREDITS }),
+    });
     return FREE_CREDITS;
-  } catch(e) {
-    return FREE_CREDITS;
-  }
+  } catch(e) { return FREE_CREDITS; }
 }
 
 export async function getUserPlan(userId: string, accessToken: string): Promise<string> {
   if (!accessToken || !SUPABASE_URL) return "free";
   try {
-    var raw = await restRpc("get_user_plan", { p_user_id: userId }, accessToken);
-    var plan = Array.isArray(raw) ? raw[0] : raw;
-    return plan || "free";
-  } catch(e) {
-    return "free";
-  }
+    var res = await fetch(SUPABASE_URL + "/rest/v1/subscriptions?user_id=eq." + userId + "&status=eq.active&select=plan,expires_at&order=expires_at.desc&limit=1", { headers: headers(accessToken) });
+    if (res.ok) {
+      var rows = await res.json();
+      if (rows && rows.length > 0) {
+        var sub = rows[0];
+        if (!sub.expires_at || new Date(sub.expires_at) > new Date()) return sub.plan;
+      }
+    }
+  } catch(e) {}
+  return "free";
 }
 
 export async function deductCredits(userId: string, amount: number, description: string, accessToken: string): Promise<{ success: boolean; balance: number; error?: string }> {
   if (!accessToken || !SUPABASE_URL) return { success: false, balance: 0, error: "未认证" };
 
   try {
-    var result = await restRpc("deduct_credits_atomic", {
-      p_user_id: userId,
-      p_amount: amount,
-      p_description: description,
-    }, accessToken);
+    // 1. 读取当前余额
+    var res = await fetch(SUPABASE_URL + "/rest/v1/credits?user_id=eq." + userId + "&select=balance", { headers: headers(accessToken) });
+    if (!res.ok) return { success: false, balance: 0, error: "读取余额失败" };
 
-    var row = Array.isArray(result) ? result[0] : result;
-    if (row && row.success) {
-      return { success: true, balance: row.new_balance };
-    }
+    var rows = await res.json();
+    if (!rows || rows.length === 0) return { success: false, balance: 0, error: "无积分记录" };
 
-    if (row && row.error) {
-      return { success: false, balance: row.new_balance || 0, error: row.error };
-    }
+    var currentBalance = rows[0].balance;
+    if (currentBalance < amount) return { success: false, balance: currentBalance, error: "积分不足" };
 
-    var rows = await restQuery("credits", "?user_id=eq." + userId + "&select=balance", accessToken);
-    var currentBalance = (rows && rows.length > 0) ? rows[0].balance : null;
-
-    if (currentBalance === null) {
-      var insertResult = await restInsert("credits", { user_id: userId, balance: FREE_CREDITS - amount }, accessToken);
-      if (!insertResult) return { success: false, balance: 0, error: "创建积分记录失败" };
-      await restInsert("credit_transactions", { user_id: userId, amount: -amount, type: "deduct", description: description }, accessToken);
-      return { success: true, balance: FREE_CREDITS - amount };
-    }
-
-    if (currentBalance < amount) {
-      return { success: false, balance: currentBalance, error: "积分不足" };
-    }
-
+    // 2. 扣减余额
     var newBalance = currentBalance - amount;
-    var updateResult = await restUpdate("credits", "?user_id=eq." + userId, { balance: newBalance, updated_at: new Date().toISOString() }, accessToken);
-    if (!updateResult.ok || updateResult.rows.length === 0) {
+    var patchRes = await fetch(SUPABASE_URL + "/rest/v1/credits?user_id=eq." + userId, {
+      method: "PATCH",
+      headers: headers(accessToken),
+      body: JSON.stringify({ balance: newBalance, updated_at: new Date().toISOString() }),
+    });
+
+    if (!patchRes.ok) {
+      var err = await patchRes.text().catch(function() { return ""; });
+      console.error("[credits] PATCH failed:", patchRes.status, err.slice(0, 200));
       return { success: false, balance: currentBalance, error: "更新失败" };
     }
 
-    await restInsert("credit_transactions", { user_id: userId, amount: -amount, type: "deduct", description: description }, accessToken);
+    // 3. 记录交易
+    await fetch(SUPABASE_URL + "/rest/v1/credit_transactions", {
+      method: "POST",
+      headers: headers(accessToken),
+      body: JSON.stringify({ user_id: userId, amount: -amount, type: "deduct", description: description }),
+    });
+
     return { success: true, balance: newBalance };
   } catch(e: any) {
     console.error("[credits] deductCredits error:", e.message);
@@ -166,28 +100,25 @@ export async function deductCredits(userId: string, amount: number, description:
 export async function grantCredits(userId: string, amount: number, description: string, accessToken: string): Promise<void> {
   if (!accessToken || !SUPABASE_URL) return;
   try {
-    var rows = await restQuery("credits", "?user_id=eq." + userId + "&select=balance", accessToken);
-    var currentBalance = (rows && rows.length > 0) ? rows[0].balance : 0;
-    var newBalance = currentBalance + amount;
+    var res = await fetch(SUPABASE_URL + "/rest/v1/credits?user_id=eq." + userId + "&select=balance", { headers: headers(accessToken) });
+    var rows = await res.json();
+    var current = (rows && rows.length > 0) ? rows[0].balance : 0;
+    var newBalance = current + amount;
     if (rows && rows.length > 0) {
-      await restUpdate("credits", "?user_id=eq." + userId, { balance: newBalance, updated_at: new Date().toISOString() }, accessToken);
+      await fetch(SUPABASE_URL + "/rest/v1/credits?user_id=eq." + userId, { method: "PATCH", headers: headers(accessToken), body: JSON.stringify({ balance: newBalance }) });
     } else {
-      await restInsert("credits", { user_id: userId, balance: newBalance }, accessToken);
+      await fetch(SUPABASE_URL + "/rest/v1/credits", { method: "POST", headers: headers(accessToken), body: JSON.stringify({ user_id: userId, balance: newBalance }) });
     }
-    await restInsert("credit_transactions", { user_id: userId, amount, type: "grant", description }, accessToken);
-  } catch(e: any) {
-    console.error("[credits] grantCredits error:", e.message);
-  }
+    await fetch(SUPABASE_URL + "/rest/v1/credit_transactions", { method: "POST", headers: headers(accessToken), body: JSON.stringify({ user_id: userId, amount: amount, type: "grant", description: description }) });
+  } catch(e: any) { console.error("[credits] grantCredits error:", e.message); }
 }
 
-export async function getCreditTransactions(userId: string, accessToken: string, limit = 20): Promise<{ amount: number; type: string; description: string; created_at: string }[]> {
+export async function getCreditTransactions(userId: string, accessToken: string, limit = 20) {
   if (!accessToken || !SUPABASE_URL) return [];
-  var rows = await restQuery("credit_transactions", "?user_id=eq." + userId + "&order=created_at.desc&limit=" + limit + "&select=amount,type,description,created_at", accessToken);
-  return rows || [];
+  var res = await fetch(SUPABASE_URL + "/rest/v1/credit_transactions?user_id=eq." + userId + "&order=created_at.desc&limit=" + limit + "&select=amount,type,description,created_at", { headers: headers(accessToken) });
+  if (!res.ok) return [];
+  return await res.json();
 }
 
-export function isLowCredits(balance: number): boolean {
-  return balance < LOW_CREDIT_THRESHOLD;
-}
-
+export function isLowCredits(balance: number): boolean { return balance < LOW_CREDIT_THRESHOLD; }
 export { FREE_CREDITS, LOW_CREDIT_THRESHOLD, INPUT_CREDITS_PER_1K, OUTPUT_CREDITS_PER_1K, FREE_DAILY_LIMIT };
