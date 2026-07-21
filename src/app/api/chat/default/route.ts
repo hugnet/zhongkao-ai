@@ -1,9 +1,9 @@
 ﻿import { NextRequest, NextResponse } from 'next/server';
 import { skillEngine } from '@/lib/skills/skillEngine';
-import { getCredits, deductCredits, calculateCredits, getUserPlan, FREE_DAILY_LIMIT } from '@/lib/credits';
+import { getCredits, deductCredits, calculateCredits, getUserPlan, getDailyCount, incrementDailyUsage, FREE_DAILY_LIMIT } from '@/lib/credits';
 import { getProvider, buildChatURL } from '@/lib/ai/providers';
 
-var DEFAULT_PROVIDER_ID = 'agnes';
+const DEFAULT_PROVIDER_ID = 'agnes';
 
 function getDefaultApiKey(): string {
   return process.env.DEFAULT_API_KEY || '';
@@ -11,15 +11,15 @@ function getDefaultApiKey(): string {
 
 export async function POST(req: NextRequest) {
   try {
-    var body = await req.json();
-    var { messages, agentId, userId, accessToken } = body;
+    const body = await req.json();
+    const { messages, agentId, userId, accessToken } = body;
 
-    var apiKey = getDefaultApiKey();
+    const apiKey = getDefaultApiKey();
     if (!apiKey) {
       return NextResponse.json({ error: '服务未配置' }, { status: 503 });
     }
 
-    var provider = getProvider(DEFAULT_PROVIDER_ID);
+    const provider = getProvider(DEFAULT_PROVIDER_ID);
     if (!provider) {
       return NextResponse.json({ error: '配置错误' }, { status: 500 });
     }
@@ -28,24 +28,35 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: '请先登录后再使用' }, { status: 401 });
     }
 
-    var userPlan = await getUserPlan(userId, accessToken);
-    var isPremium = userPlan === 'monthly' || userPlan === 'yearly';
+    const userPlan = await getUserPlan(userId, accessToken);
+    const isPremium = userPlan === 'monthly' || userPlan === 'yearly';
 
-    var credits = await getCredits(userId, accessToken);
-    if (!isPremium && credits < 1) {
-      return NextResponse.json({ error: 'INSUFFICIENT_CREDITS', credits: credits }, { status: 402 });
+    // 检查每日限制
+    const dailyCount = await getDailyCount(userId, accessToken);
+    if (!isPremium && dailyCount >= FREE_DAILY_LIMIT) {
+      return NextResponse.json({
+        error: 'DAILY_LIMIT_EXCEEDED',
+        daily_count: dailyCount,
+        daily_limit: FREE_DAILY_LIMIT,
+      }, { status: 429 });
     }
 
-    var systemPrompt = skillEngine.getSystemPrompt(agentId || 'math-tutor');
-    var allMessages = [{ role: 'system', content: systemPrompt }];
+    // 检查积分
+    const credits = await getCredits(userId, accessToken);
+    if (!isPremium && credits < 1) {
+      return NextResponse.json({ error: 'INSUFFICIENT_CREDITS', credits }, { status: 402 });
+    }
+
+    const systemPrompt = skillEngine.getSystemPrompt(agentId || 'math-tutor');
+    const allMessages = [{ role: 'system', content: systemPrompt }];
     if (messages) {
-      for (var i = Math.max(0, messages.length - 20); i < messages.length; i++) {
+      for (let i = Math.max(0, messages.length - 20); i < messages.length; i++) {
         allMessages.push(messages[i]);
       }
     }
 
-    var url = buildChatURL(provider);
-    var res = await fetch(url, {
+    const url = buildChatURL(provider);
+    const res = await fetch(url, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -60,36 +71,43 @@ export async function POST(req: NextRequest) {
     });
 
     if (!res.ok) {
-      var errText = await res.text().catch(function() { return ''; });
-      var errMsg = 'AI服务暂时不可用';
+      let errText = await res.text().catch(() => '');
+      let errMsg = 'AI服务暂时不可用';
       try {
-        var errJson = JSON.parse(errText);
+        const errJson = JSON.parse(errText);
         if (errJson.error) errMsg = typeof errJson.error === 'string' ? errJson.error : (errJson.error.message || 'AI服务错误');
       } catch(e) { if (errText) errMsg = errText.slice(0, 200); }
       return NextResponse.json({ error: errMsg }, { status: res.status });
     }
 
-    var data = await res.json();
-    var content = '';
+    const data = await res.json();
+    let content = '';
     if (data.choices && data.choices[0] && data.choices[0].message) {
       content = data.choices[0].message.content || '';
     }
     if (!content) content = '抱歉，暂时无法回答。';
 
-    var usage = data.usage || {};
-    var creditsUsed = calculateCredits(usage);
-    var description = 'AI对话 (输入' + (usage.prompt_tokens || 0) + ' + 输出' + (usage.completion_tokens || 0) + ' tokens)';
+    const usage = data.usage || {};
+    const creditsUsed = calculateCredits(usage);
+    const description = 'AI对话 (输入' + (usage.prompt_tokens || 0) + ' + 输出' + (usage.completion_tokens || 0) + ' tokens)';
 
-    var remainingCredits = credits;
+    let remainingCredits = credits;
+
+    // 非会员扣积分
     if (!isPremium) {
-      var deductResult = await deductCredits(userId, creditsUsed, description, accessToken);
+      const deductResult = await deductCredits(userId, creditsUsed, description, accessToken);
       remainingCredits = deductResult.success ? deductResult.balance : credits;
     }
 
+    // 增加每日使用次数
+    const newDailyCount = await incrementDailyUsage(userId, accessToken);
+
     return NextResponse.json({
-      content: content,
+      content,
       credits: remainingCredits,
       plan: userPlan,
+      daily_count: newDailyCount,
+      daily_limit: FREE_DAILY_LIMIT,
       usage: {
         prompt_tokens: usage.prompt_tokens || 0,
         completion_tokens: usage.completion_tokens || 0,

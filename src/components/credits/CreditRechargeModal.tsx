@@ -13,13 +13,13 @@ interface CreditRechargeModalProps {
 export function CreditRechargeModal({ open, balance, message, onClose }: CreditRechargeModalProps) {
   if (!open) return null;
 
-  var isDailyLimit = message && message.indexOf('每日') !== -1;
+  var isDailyLimit = message === 'daily_limit' || (message && message.indexOf('每日') !== -1);
 
   return (
     <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" onClick={onClose}>
       <div className="bg-white rounded-2xl max-w-md w-full shadow-2xl" onClick={function(e) { e.stopPropagation(); }}>
         <div className="p-6 text-center">
-          <div className="text-5xl mb-4">{isDailyLimit ? '&#128274;' : '&#128176;'}</div>
+          <div className="text-5xl mb-4">{isDailyLimit ? '🔒' : '💰'}</div>
           <h2 className="text-xl font-bold text-gray-900 mb-2">
             {isDailyLimit ? '今日对话次数已用完' : '积分不足'}
           </h2>
@@ -44,11 +44,11 @@ export function CreditRechargeModal({ open, balance, message, onClose }: CreditR
             <div className="text-xs font-semibold text-gray-700 mb-2">会员权益</div>
             <div className="space-y-1.5">
               <div className="text-xs text-gray-600 flex items-center gap-2">
-                <span className="text-blue-600">&#10003;</span>
+                <span className="text-blue-600">✓</span>
                 <span><b>月度会员 ¥39/月</b> — 不限对话次数</span>
               </div>
               <div className="text-xs text-gray-600 flex items-center gap-2">
-                <span className="text-blue-600">&#10003;</span>
+                <span className="text-blue-600">✓</span>
                 <span><b>年度会员 ¥299/年</b> — 不限对话 + 5000积分</span>
               </div>
             </div>

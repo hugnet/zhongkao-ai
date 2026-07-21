@@ -1,124 +1,195 @@
-﻿const INPUT_CREDITS_PER_1K = 1;
-const OUTPUT_CREDITS_PER_1K = 3;
+﻿import { createServerClient } from '@/lib/supabase/server';
+
 const FREE_CREDITS = 1000;
 const LOW_CREDIT_THRESHOLD = 100;
 const FREE_DAILY_LIMIT = 30;
-
-const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL || "";
-const SUPABASE_ANON_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "";
-
-function headers(token: string) {
-  return {
-    "Authorization": "Bearer " + token,
-    "apikey": SUPABASE_ANON_KEY,
-    "Content-Type": "application/json",
-    "Prefer": "return=representation",
-  };
-}
+const INPUT_CREDITS_PER_1K = 1;
+const OUTPUT_CREDITS_PER_1K = 3;
 
 export function calculateCredits(usage: { prompt_tokens?: number; completion_tokens?: number }): number {
-  var input = usage.prompt_tokens || 0;
-  var output = usage.completion_tokens || 0;
+  const input = usage.prompt_tokens || 0;
+  const output = usage.completion_tokens || 0;
   return Math.max(Math.ceil((input / 1000) * INPUT_CREDITS_PER_1K) + Math.ceil((output / 1000) * OUTPUT_CREDITS_PER_1K), 1);
 }
 
 export async function getCredits(userId: string, accessToken: string): Promise<number> {
-  if (!accessToken || !SUPABASE_URL) return FREE_CREDITS;
+  if (!accessToken) return FREE_CREDITS;
+  const sb = createServerClient(accessToken);
+  if (!sb) return FREE_CREDITS;
   try {
-    var res = await fetch(SUPABASE_URL + "/rest/v1/credits?user_id=eq." + userId + "&select=balance", { headers: headers(accessToken) });
-    if (res.ok) {
-      var rows = await res.json();
-      if (rows && rows.length > 0 && rows[0].balance != null) return rows[0].balance;
+    const { data, error } = await sb
+      .from('credits')
+      .select('balance')
+      .eq('user_id', userId)
+      .single();
+    if (error || !data) {
+      await sb.from('credits').insert({ user_id: userId, balance: FREE_CREDITS });
+      return FREE_CREDITS;
     }
-    // 创建积分记录
-    await fetch(SUPABASE_URL + "/rest/v1/credits", {
-      method: "POST",
-      headers: headers(accessToken),
-      body: JSON.stringify({ user_id: userId, balance: FREE_CREDITS }),
-    });
+    return data.balance ?? FREE_CREDITS;
+  } catch (e) {
     return FREE_CREDITS;
-  } catch(e) { return FREE_CREDITS; }
+  }
 }
 
 export async function getUserPlan(userId: string, accessToken: string): Promise<string> {
-  if (!accessToken || !SUPABASE_URL) return "free";
+  if (!accessToken) return 'free';
+  const sb = createServerClient(accessToken);
+  if (!sb) return 'free';
   try {
-    var res = await fetch(SUPABASE_URL + "/rest/v1/subscriptions?user_id=eq." + userId + "&status=eq.active&select=plan,expires_at&order=expires_at.desc&limit=1", { headers: headers(accessToken) });
-    if (res.ok) {
-      var rows = await res.json();
-      if (rows && rows.length > 0) {
-        var sub = rows[0];
-        if (!sub.expires_at || new Date(sub.expires_at) > new Date()) return sub.plan;
-      }
+    const { data, error } = await sb
+      .from('subscriptions')
+      .select('plan, expires_at')
+      .eq('user_id', userId)
+      .eq('status', 'active')
+      .order('expires_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (error || !data) return 'free';
+    if (!data.expires_at || new Date(data.expires_at) > new Date()) {
+      return data.plan || 'free';
     }
-  } catch(e) {}
-  return "free";
+  } catch (e) {}
+  return 'free';
 }
 
-export async function deductCredits(userId: string, amount: number, description: string, accessToken: string): Promise<{ success: boolean; balance: number; error?: string }> {
-  if (!accessToken || !SUPABASE_URL) return { success: false, balance: 0, error: "未认证" };
+export async function getDailyCount(userId: string, accessToken: string): Promise<number> {
+  if (!accessToken) return 0;
+  const sb = createServerClient(accessToken);
+  if (!sb) return 0;
+  try {
+    const today = new Date().toISOString().split('T')[0];
+    const { data } = await sb
+      .from('daily_usage')
+      .select('message_count')
+      .eq('user_id', userId)
+      .eq('usage_date', today)
+      .maybeSingle();
+    return data?.message_count ?? 0;
+  } catch (e) {
+    return 0;
+  }
+}
+
+export async function incrementDailyUsage(userId: string, accessToken: string): Promise<number> {
+  if (!accessToken) return 0;
+  const sb = createServerClient(accessToken);
+  if (!sb) return 0;
+  try {
+    const today = new Date().toISOString().split('T')[0];
+    const { data } = await sb
+      .from('daily_usage')
+      .select('message_count')
+      .eq('user_id', userId)
+      .eq('usage_date', today)
+      .maybeSingle();
+    if (data) {
+      await sb
+        .from('daily_usage')
+        .update({ message_count: data.message_count + 1 })
+        .eq('user_id', userId)
+        .eq('usage_date', today);
+      return data.message_count + 1;
+    } else {
+      await sb
+        .from('daily_usage')
+        .insert({ user_id: userId, usage_date: today, message_count: 1 });
+      return 1;
+    }
+  } catch (e) {
+    return 0;
+  }
+}
+
+export async function deductCredits(
+  userId: string,
+  amount: number,
+  description: string,
+  accessToken: string
+): Promise<{ success: boolean; balance: number; error?: string }> {
+  if (!accessToken) return { success: false, balance: 0, error: '未认证' };
+  const sb = createServerClient(accessToken);
+  if (!sb) return { success: false, balance: 0, error: '服务未就绪' };
 
   try {
-    // 1. 读取当前余额
-    var res = await fetch(SUPABASE_URL + "/rest/v1/credits?user_id=eq." + userId + "&select=balance", { headers: headers(accessToken) });
-    if (!res.ok) return { success: false, balance: 0, error: "读取余额失败" };
+    const { data: creditRow, error: readErr } = await sb
+      .from('credits')
+      .select('balance')
+      .eq('user_id', userId)
+      .single();
+    if (readErr || !creditRow) return { success: false, balance: 0, error: '无积分记录' };
 
-    var rows = await res.json();
-    if (!rows || rows.length === 0) return { success: false, balance: 0, error: "无积分记录" };
+    const currentBalance = creditRow.balance ?? 0;
+    if (currentBalance < amount) return { success: false, balance: currentBalance, error: '积分不足' };
 
-    var currentBalance = rows[0].balance;
-    if (currentBalance < amount) return { success: false, balance: currentBalance, error: "积分不足" };
-
-    // 2. 扣减余额
-    var newBalance = currentBalance - amount;
-    var patchRes = await fetch(SUPABASE_URL + "/rest/v1/credits?user_id=eq." + userId, {
-      method: "PATCH",
-      headers: headers(accessToken),
-      body: JSON.stringify({ balance: newBalance, updated_at: new Date().toISOString() }),
-    });
-
-    if (!patchRes.ok) {
-      var err = await patchRes.text().catch(function() { return ""; });
-      console.error("[credits] PATCH failed:", patchRes.status, err.slice(0, 200));
-      return { success: false, balance: currentBalance, error: "更新失败" };
+    const newBalance = currentBalance - amount;
+    const { error: updateErr } = await sb
+      .from('credits')
+      .update({ balance: newBalance, updated_at: new Date().toISOString() })
+      .eq('user_id', userId);
+    if (updateErr) {
+      console.error('[credits] update failed:', updateErr.message);
+      return { success: false, balance: currentBalance, error: '更新失败: ' + updateErr.message };
     }
 
-    // 3. 记录交易
-    await fetch(SUPABASE_URL + "/rest/v1/credit_transactions", {
-      method: "POST",
-      headers: headers(accessToken),
-      body: JSON.stringify({ user_id: userId, amount: -amount, type: "deduct", description: description }),
+    await sb.from('credit_transactions').insert({
+      user_id: userId,
+      amount: -amount,
+      type: 'deduct',
+      description: description,
     });
 
     return { success: true, balance: newBalance };
-  } catch(e: any) {
-    console.error("[credits] deductCredits error:", e.message);
+  } catch (e: any) {
+    console.error('[credits] deductCredits error:', e.message);
     return { success: false, balance: 0, error: e.message };
   }
 }
 
-export async function grantCredits(userId: string, amount: number, description: string, accessToken: string): Promise<void> {
-  if (!accessToken || !SUPABASE_URL) return;
+export async function grantCredits(
+  userId: string,
+  amount: number,
+  description: string,
+  accessToken: string
+): Promise<void> {
+  if (!accessToken) return;
+  const sb = createServerClient(accessToken);
+  if (!sb) return;
   try {
-    var res = await fetch(SUPABASE_URL + "/rest/v1/credits?user_id=eq." + userId + "&select=balance", { headers: headers(accessToken) });
-    var rows = await res.json();
-    var current = (rows && rows.length > 0) ? rows[0].balance : 0;
-    var newBalance = current + amount;
-    if (rows && rows.length > 0) {
-      await fetch(SUPABASE_URL + "/rest/v1/credits?user_id=eq." + userId, { method: "PATCH", headers: headers(accessToken), body: JSON.stringify({ balance: newBalance }) });
+    const { data } = await sb.from('credits').select('balance').eq('user_id', userId).single();
+    const current = data?.balance ?? 0;
+    const newBalance = current + amount;
+    if (data) {
+      await sb.from('credits').update({ balance: newBalance }).eq('user_id', userId);
     } else {
-      await fetch(SUPABASE_URL + "/rest/v1/credits", { method: "POST", headers: headers(accessToken), body: JSON.stringify({ user_id: userId, balance: newBalance }) });
+      await sb.from('credits').insert({ user_id: userId, balance: newBalance });
     }
-    await fetch(SUPABASE_URL + "/rest/v1/credit_transactions", { method: "POST", headers: headers(accessToken), body: JSON.stringify({ user_id: userId, amount: amount, type: "grant", description: description }) });
-  } catch(e: any) { console.error("[credits] grantCredits error:", e.message); }
+    await sb.from('credit_transactions').insert({
+      user_id: userId,
+      amount: amount,
+      type: 'grant',
+      description: description,
+    });
+  } catch (e: any) {
+    console.error('[credits] grantCredits error:', e.message);
+  }
 }
 
 export async function getCreditTransactions(userId: string, accessToken: string, limit = 20) {
-  if (!accessToken || !SUPABASE_URL) return [];
-  var res = await fetch(SUPABASE_URL + "/rest/v1/credit_transactions?user_id=eq." + userId + "&order=created_at.desc&limit=" + limit + "&select=amount,type,description,created_at", { headers: headers(accessToken) });
-  if (!res.ok) return [];
-  return await res.json();
+  if (!accessToken) return [];
+  const sb = createServerClient(accessToken);
+  if (!sb) return [];
+  const { data } = await sb
+    .from('credit_transactions')
+    .select('amount,type,description,created_at')
+    .eq('user_id', userId)
+    .order('created_at', { ascending: false })
+    .limit(limit);
+  return data || [];
 }
 
-export function isLowCredits(balance: number): boolean { return balance < LOW_CREDIT_THRESHOLD; }
+export function isLowCredits(balance: number): boolean {
+  return balance < LOW_CREDIT_THRESHOLD;
+}
+
 export { FREE_CREDITS, LOW_CREDIT_THRESHOLD, INPUT_CREDITS_PER_1K, OUTPUT_CREDITS_PER_1K, FREE_DAILY_LIMIT };
