@@ -1,6 +1,6 @@
-Ôªøimport { NextRequest, NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 import { skillEngine } from '@/lib/skills/skillEngine';
-import { getCredits, deductCredits, calculateCredits } from '@/lib/credits';
+import { getCredits, deductCredits, calculateCredits, getUserPlan, FREE_DAILY_LIMIT } from '@/lib/credits';
 import { getProvider, buildChatURL } from '@/lib/ai/providers';
 import { createClient } from '@supabase/supabase-js';
 
@@ -25,28 +25,49 @@ export async function POST(req: NextRequest) {
     var apiKey = getDefaultApiKey();
     if (!apiKey) {
       console.error('[chat/default] DEFAULT_API_KEY not set');
-      return NextResponse.json({ error: 'ÊúçÂä°Êú™ÈÖçÁΩÆÔºåËØ∑ËÅîÁ≥ªÁÆ°ÁêÜÂëò' }, { status: 503 });
+      return NextResponse.json({ error: '∑˛ŒÒŒ¥≈‰÷√£¨«Î¡™œµπ‹¿Ì‘±' }, { status: 503 });
     }
 
     var provider = getProvider(DEFAULT_PROVIDER_ID);
     if (!provider) {
-      return NextResponse.json({ error: 'ÈÖçÁΩÆÈîôËØØ' }, { status: 500 });
+      return NextResponse.json({ error: '≈‰÷√¥ÌŒÛ' }, { status: 500 });
     }
 
     if (!userId || !accessToken) {
-      return NextResponse.json({ error: 'ËØ∑ÂÖàÁôªÂΩïÂêéÂÜç‰ΩøÁî®' }, { status: 401 });
+      return NextResponse.json({ error: '«Îœ»µ«¬º∫Û‘Ÿ π”√' }, { status: 401 });
     }
 
     var sb = getSupabase();
     if (sb && accessToken) {
       var { data: userData } = await sb.auth.getUser(accessToken);
       if (!userData?.user?.email_confirmed_at) {
-        return NextResponse.json({ error: 'ËØ∑ÂÖàÂà∞ÈÇÆÁÆ±Á°ÆËÆ§ÂêéÂÜç‰ΩøÁî®' }, { status: 403 });
+        return NextResponse.json({ error: '«Îœ»µΩ” œ‰»∑»œ∫Û‘Ÿ π”√' }, { status: 403 });
+      }
+    }
+
+    var userPlan = await getUserPlan(userId, accessToken);
+    var isPremium = userPlan === 'monthly' || userPlan === 'yearly';
+
+    if (!isPremium) {
+      var { count: dailyCount } = await sb!.from('credit_transactions')
+        .select('*', { count: 'exact', head: true })
+        .eq('user_id', userId)
+        .eq('type', 'deduct')
+        .gte('created_at', new Date(new Date().setHours(0, 0, 0, 0)).toISOString());
+
+      if (dailyCount && dailyCount >= FREE_DAILY_LIMIT) {
+        return NextResponse.json({
+          error: 'DAILY_LIMIT_EXCEEDED',
+          message: '√‚∑—”√ªß√ø»’Ã·Œ …œœﬁŒ™' + FREE_DAILY_LIMIT + '¥Œ£¨…˝º∂ª·‘±Ω‚À¯ŒﬁœﬁÃ·Œ ',
+          plan: userPlan,
+          daily_count: dailyCount,
+          daily_limit: FREE_DAILY_LIMIT,
+        }, { status: 429 });
       }
     }
 
     var credits = await getCredits(userId, accessToken);
-    if (credits < 1) {
+    if (!isPremium && credits < 1) {
       return NextResponse.json({ error: 'INSUFFICIENT_CREDITS', credits: credits }, { status: 402 });
     }
 
@@ -77,7 +98,7 @@ export async function POST(req: NextRequest) {
     if (!res.ok) {
       var errText = await res.text().catch(function() { return ''; });
       console.error('[chat/default] API error:', res.status, errText.slice(0, 500));
-      var errMsg = 'AIÊúçÂä°ÊöÇÊó∂‰∏çÂèØÁî®';
+      var errMsg = 'AI∑˛ŒÒ‘› ±≤ªø…”√';
       try {
         var errJson = JSON.parse(errText);
         if (errJson.error) {
@@ -95,19 +116,26 @@ export async function POST(req: NextRequest) {
       content = data.choices[0].message.content || '';
     }
     if (!content) {
-      content = 'Êä±Ê≠âÔºåÊöÇÊó∂Êó†Ê≥ïÂõûÁ≠î„ÄÇ';
+      content = '±ß«∏£¨‘› ±Œﬁ∑®ªÿ¥°£';
     }
 
     var usage = data.usage || {};
     var creditsUsed = calculateCredits(usage);
-    var description = 'AIÂØπËØù (ËæìÂÖ•' + (usage.prompt_tokens || 0) + ' + ËæìÂá∫' + (usage.completion_tokens || 0) + ' tokens)';
+    var description = 'AI∂‘ª∞ ( ‰»Î' + (usage.prompt_tokens || 0) + ' +  ‰≥ˆ' + (usage.completion_tokens || 0) + ' tokens)';
 
-    var deductResult = await deductCredits(userId, creditsUsed, description, accessToken);
-    var remainingCredits = deductResult.success ? deductResult.balance : credits;
+    var remainingCredits = credits;
+    if (!isPremium) {
+      var deductResult = await deductCredits(userId, creditsUsed, description, accessToken);
+      remainingCredits = deductResult.success ? deductResult.balance : credits;
+    } else {
+      await deductCredits(userId, creditsUsed, '[ª·‘±] ' + description, accessToken);
+      remainingCredits = credits - creditsUsed;
+    }
 
     return NextResponse.json({
       content: content,
       credits: remainingCredits,
+      plan: userPlan,
       usage: {
         prompt_tokens: usage.prompt_tokens || 0,
         completion_tokens: usage.completion_tokens || 0,
@@ -117,6 +145,6 @@ export async function POST(req: NextRequest) {
     });
   } catch (err: any) {
     console.error('[chat/default] Exception:', err.message, err.stack);
-    return NextResponse.json({ error: 'ÊúçÂä°ÊöÇÊó∂‰∏çÂèØÁî®Ôºö' + (err.message || 'Êú™Áü•ÈîôËØØ') }, { status: 500 });
+    return NextResponse.json({ error: '∑˛ŒÒ‘› ±≤ªø…”√£∫' + (err.message || 'Œ¥÷™¥ÌŒÛ') }, { status: 500 });
   }
 }

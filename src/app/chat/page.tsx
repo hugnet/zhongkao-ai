@@ -68,7 +68,7 @@ export default function ChatPage() {
         if (rows && rows.length > 0) {
           setCredits(rows[0].balance);
         } else {
-          await fetch(url + '/rest/v1/credits', { method: 'POST', headers: { ...headers, 'Prefer': 'return=minimal' }, body: JSON.stringify({ user_id: uid, balance: 3000 }) });
+          await fetch(url + '/rest/v1/credits', { method: 'POST', headers: { ...headers, 'Prefer': 'return=representation' }, body: JSON.stringify({ user_id: uid, balance: 3000 }) });
           setCredits(3000);
         }
       } else { setCredits(3000); }
@@ -80,21 +80,6 @@ export default function ChatPage() {
     } catch(e) { setCredits(3000); }
   }
 
-  async function doDeductCredits(uid: string, amount: number) {
-    var url = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
-    if (!url) return;
-    try {
-      var headers = await restHeaders();
-      var res = await fetch(url + '/rest/v1/credits?user_id=eq.' + uid + '&select=balance', { headers });
-      if (!res.ok) return;
-      var rows = await res.json();
-      var current = (rows && rows.length > 0) ? rows[0].balance : 3000;
-      var newBal = Math.max(current - amount, 0);
-      await fetch(url + '/rest/v1/credits?user_id=eq.' + uid, { method: 'PATCH', headers: { ...headers, 'Prefer': 'return=minimal' }, body: JSON.stringify({ balance: newBal, updated_at: new Date().toISOString() }) });
-      await fetch(url + '/rest/v1/credit_transactions', { method: 'POST', headers: { ...headers, 'Prefer': 'return=minimal' }, body: JSON.stringify({ user_id: uid, amount: -amount, type: 'deduct', description: 'AI对话消耗' }) });
-      setCredits(newBal);
-    } catch(e) { console.error('deduct error:', e); }
-  }
 
   async function doSaveHistory(uid: string, agentId: string, title: string, msgs: ChatMsg[], histId?: string) {
     var url = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
@@ -139,13 +124,14 @@ export default function ChatPage() {
       var data = await res.json();
 
       if (data.error === 'INSUFFICIENT_CREDITS') { setLowBalance(data.credits || 0); setShowRecharge(true); setLoading(false); setMessages(messages); return; }
+      if (data.error === 'DAILY_LIMIT_EXCEEDED') { setMessages(newMsgs.concat([{ id: generateId(), role: 'assistant', content: data.message || '免费用户每日提问上限为30次，升级会员解锁无限提问', agentId: currentAgent }])); setLoading(false); return; }
 
       var reply = data.error ? ('请求出错：' + data.error) : (data.content || '抱歉，暂时无法回答。');
       var assistantMsg: ChatMsg = { id: generateId(), role: 'assistant', content: reply, agentId: currentAgent, tokenInfo: data.usage };
       var allMsgs = newMsgs.concat([assistantMsg]);
       setMessages(allMsgs);
 
-      if (data.usage && data.usage.credits_used && userId) await doDeductCredits(userId, data.usage.credits_used);
+      if (data.credits !== undefined) setCredits(data.credits);
 
       var title = (newMsgs[0]?.content || '新对话').slice(0, 30);
       if (userId) await doSaveHistory(userId, currentAgent, title, allMsgs, currentHistoryId || undefined);
