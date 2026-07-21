@@ -59,7 +59,7 @@ export default function ChatPage() {
 
   async function initCreditsAndHistory(uid: string) {
     var url = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
-    if (!url) { setCredits(3000); return; }
+    if (!url) { setCredits(1000); return; }
     try {
       var headers = await restHeaders();
       var creditRes = await fetch(url + '/rest/v1/credits?user_id=eq.' + uid + '&select=balance', { headers: headers });
@@ -68,16 +68,16 @@ export default function ChatPage() {
         if (rows && rows.length > 0) {
           setCredits(rows[0].balance);
         } else {
-          await fetch(url + '/rest/v1/credits', { method: 'POST', headers: { ...headers, 'Prefer': 'return=representation' }, body: JSON.stringify({ user_id: uid, balance: 3000 }) });
-          setCredits(3000);
+          await fetch(url + '/rest/v1/credits', { method: 'POST', headers: { ...headers, 'Prefer': 'return=representation' }, body: JSON.stringify({ user_id: uid, balance: 1000 }) });
+          setCredits(1000);
         }
-      } else { setCredits(3000); }
+      } else { setCredits(1000); }
       var histRes = await fetch(url + '/rest/v1/chat_history?user_id=eq.' + uid + '&order=updated_at.desc&limit=50&select=id,agent_id,title,messages,updated_at', { headers: headers });
       if (histRes.ok) {
         var hrows = await histRes.json();
         if (hrows) setHistories(hrows.map(function(h: any) { return { id: String(h.id), agent_id: h.agent_id, title: h.title, messages: h.messages || [], updated_at: h.updated_at }; }));
       }
-    } catch(e) { setCredits(3000); }
+    } catch(e) { setCredits(1000); }
   }
 
 
