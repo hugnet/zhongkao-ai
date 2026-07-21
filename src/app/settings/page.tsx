@@ -69,11 +69,11 @@ export default function SettingsPage() {
         <CardHeader><CardTitle>积分说明</CardTitle></CardHeader>
         <CardContent>
           <div className="text-sm text-gray-600 space-y-2">
-            <p>- 注册即赠 <span className="font-bold text-blue-600">3000积分</span></p>
+            <p>- 注册即赠 <span className="font-bold text-blue-600">1000积分</span></p>
             <p>- 积分按实际对话token消耗扣除，每次约1-10积分</p>
             <p>- 积分用完后可购买积分包或开通会员</p>
-            <p>- 月度会员赠送 <span className="font-bold text-blue-600">30000积分</span></p>
-            <p>- 年度会员赠送 <span className="font-bold text-blue-600">500000积分</span></p>
+            <p>- 月度会员 ¥39/月，不限对话次数</p>
+            <p>- 年度会员 ¥299/年，不限对话+赠送5000积分</p>
           </div>
         </CardContent>
       </Card>

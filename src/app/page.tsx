@@ -26,7 +26,7 @@ export default function Home() {
             <Button variant="outline" size="lg">查看定价</Button>
           </Link>
         </div>
-        <p className="text-sm text-gray-400 mt-4">注册送3000积分 · 按实际token消耗扣除 · 无需API Key</p>
+        <p className="text-sm text-gray-400 mt-4">注册送1000积分 · 免费每日30次对话 · 无需API Key</p>
       </section>
 
       <section className="bg-white py-16">
@@ -84,7 +84,7 @@ export default function Home() {
           <h2 className="text-3xl font-bold text-center text-gray-900 mb-8">积分定价，透明简单</h2>
           <div className="grid grid-cols-1 md:grid-cols-3 gap-6 text-center">
             <div className="p-6 bg-green-50 rounded-2xl border border-green-200">
-              <div className="text-3xl font-bold text-green-600 mb-1">3000</div>
+              <div className="text-3xl font-bold text-green-600 mb-1">1000</div>
               <div className="text-sm text-gray-600 mb-2">免费赠送积分</div>
               <div className="text-xs text-gray-400">注册即得，按token实际消耗使用</div>
             </div>
@@ -96,7 +96,7 @@ export default function Home() {
             <div className="p-6 bg-purple-50 rounded-2xl border border-purple-200">
               <div className="text-3xl font-bold text-purple-600 mb-1">&infin;</div>
               <div className="text-sm text-gray-600 mb-2">会员赠送大量积分</div>
-              <div className="text-xs text-gray-400">月卡49元送3万/年卡399元送50万</div>
+              <div className="text-xs text-gray-400">月卡¥39不限次数/年卡¥299+5000积分</div>
             </div>
           </div>
           <div className="text-center mt-6">

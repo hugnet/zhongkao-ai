@@ -124,7 +124,7 @@ export default function ChatPage() {
       var data = await res.json();
 
       if (data.error === 'INSUFFICIENT_CREDITS') { setLowBalance(data.credits || 0); setShowRecharge(true); setLoading(false); setMessages(messages); return; }
-      if (data.error === 'DAILY_LIMIT_EXCEEDED') { setMessages(newMsgs.concat([{ id: generateId(), role: 'assistant', content: data.message || '免费用户每日提问上限为30次，升级会员解锁无限提问', agentId: currentAgent }])); setLoading(false); return; }
+      if (data.error === 'DAILY_LIMIT_EXCEEDED') { setMessages(messages); setLoading(false); setLowBalance(0); setShowRecharge(true); return; }
 
       var reply = data.error ? ('请求出错：' + data.error) : (data.content || '抱歉，暂时无法回答。');
       var assistantMsg: ChatMsg = { id: generateId(), role: 'assistant', content: reply, agentId: currentAgent, tokenInfo: data.usage };
@@ -177,7 +177,7 @@ export default function ChatPage() {
           <div className="flex items-center gap-2 px-2">
             <span className={"font-bold text-sm " + ((credits || 0) < 100 ? 'text-red-500' : 'text-green-600')}>{credits !== null ? credits : '--'}</span>
             <span className="text-gray-400 text-xs">积分</span>
-            {credits !== null && credits < 100 ? <button onClick={function() { setShowRecharge(true); }} className="text-xs text-blue-500 hover:underline">充值</button> : null}
+            {credits !== null && credits < 100 ? <a href="/pricing" className="text-xs text-blue-500 hover:underline">升级会员</a> : null}
           </div>
           <a href="/settings" className="block text-xs text-gray-400 hover:text-blue-600 px-2">&#9881; 设置</a>
         </div>
@@ -192,7 +192,7 @@ export default function ChatPage() {
             <div className="text-center py-16">
               <span className="text-5xl block mb-4">{subject?.icon}</span>
               <h3 className="text-lg font-semibold text-gray-900 mb-2">向 {agent?.name} 提问</h3>
-              <p className="text-sm text-gray-500 max-w-md mx-auto">按实际对话token消耗积分，用多少扣多少</p>
+              <p className="text-sm text-gray-500 max-w-md mx-auto">按实际token消耗积分</p>
               <div className="flex flex-wrap justify-center gap-2 mt-6">
                 {(agent?.skills || []).slice(0, 6).map(function(s) {
                   return <button key={s.id} onClick={function() { setInput("老师，我有个" + s.name + "的问题：" + s.triggers[0]); }} className="text-xs bg-gray-100 text-gray-600 px-3 py-1.5 rounded-full hover:bg-gray-200">{s.name}</button>;
@@ -230,10 +230,10 @@ export default function ChatPage() {
             <input value={input} onChange={function(e) { setInput(e.target.value); }} onKeyDown={function(e) { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(); } }} placeholder={loggedIn ? ("向" + (agent?.name || "老师") + "提问...") : "请先登录后使用AI对话"} className="flex-1 px-4 py-2.5 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white" disabled={loading} />
             <Button variant="primary" onClick={handleSend} disabled={loading || !input.trim()}>{loading ? "思考中..." : "发送"}</Button>
           </div>
-          {!loggedIn ? <p className="text-xs text-gray-400 mt-2 text-center"><a href="/login" className="text-blue-500 hover:underline">登录</a> 后即可开始AI对话，注册赠送3000积分</p> : null}
+          {!loggedIn ? <p className="text-xs text-gray-400 mt-2 text-center"><a href="/login" className="text-blue-500 hover:underline">登录</a> 后即可开始AI对话，注册赠送1000积分</p> : null}
         </div>
       </div>
-      <CreditRechargeModal open={showRecharge} balance={lowBalance} onClose={function() { setShowRecharge(false); }} />
+      <CreditRechargeModal open={showRecharge} balance={lowBalance} message={showRecharge ? (lowBalance === 0 ? 'daily_limit' : 'low_credits') : ''} onClose={function() { setShowRecharge(false); }} />
     </div>
   );
 }
