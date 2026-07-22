@@ -17,16 +17,13 @@ export async function getCredits(userId: string, accessToken: string): Promise<n
   const sb = createServerClient(accessToken);
   if (!sb) return FREE_CREDITS;
   try {
-    const { data, error } = await sb
+    const { data: creditData, error: creditErr } = await sb
       .from('credits')
       .select('balance')
       .eq('user_id', userId)
-      .single();
-    if (error || !data) {
-      await sb.from('credits').insert({ user_id: userId, balance: FREE_CREDITS });
-      return FREE_CREDITS;
-    }
-    return data.balance ?? FREE_CREDITS;
+      .maybeSingle();
+    if (!creditErr && creditData) return creditData.balance ?? FREE_CREDITS;
+    return FREE_CREDITS;
   } catch (e) {
     return FREE_CREDITS;
   }
@@ -37,20 +34,15 @@ export async function getUserPlan(userId: string, accessToken: string): Promise<
   const sb = createServerClient(accessToken);
   if (!sb) return 'free';
   try {
-    const { data, error } = await sb
-      .from('subscriptions')
-      .select('plan, expires_at')
-      .eq('user_id', userId)
-      .eq('status', 'active')
-      .order('expires_at', { ascending: false })
-      .limit(1)
-      .maybeSingle();
-    if (error || !data) return 'free';
-    if (!data.expires_at || new Date(data.expires_at) > new Date()) {
-      return data.plan || 'free';
+    const { data, error } = await sb.rpc('get_user_plan', { p_user_id: userId });
+    if (error) {
+      console.error('[credits] get_user_plan RPC error:', error.message);
+      return 'free';
     }
-  } catch (e) {}
-  return 'free';
+    return data || 'free';
+  } catch (e) {
+    return 'free';
+  }
 }
 
 export async function getDailyCount(userId: string, accessToken: string): Promise<number> {
@@ -58,14 +50,12 @@ export async function getDailyCount(userId: string, accessToken: string): Promis
   const sb = createServerClient(accessToken);
   if (!sb) return 0;
   try {
-    const today = new Date().toISOString().split('T')[0];
-    const { data } = await sb
-      .from('daily_usage')
-      .select('message_count')
-      .eq('user_id', userId)
-      .eq('usage_date', today)
-      .maybeSingle();
-    return data?.message_count ?? 0;
+    const { data, error } = await sb.rpc('get_daily_message_count', { p_user_id: userId });
+    if (error) {
+      console.error('[credits] get_daily_message_count RPC error:', error.message);
+      return 0;
+    }
+    return data ?? 0;
   } catch (e) {
     return 0;
   }
@@ -76,26 +66,12 @@ export async function incrementDailyUsage(userId: string, accessToken: string): 
   const sb = createServerClient(accessToken);
   if (!sb) return 0;
   try {
-    const today = new Date().toISOString().split('T')[0];
-    const { data } = await sb
-      .from('daily_usage')
-      .select('message_count')
-      .eq('user_id', userId)
-      .eq('usage_date', today)
-      .maybeSingle();
-    if (data) {
-      await sb
-        .from('daily_usage')
-        .update({ message_count: data.message_count + 1 })
-        .eq('user_id', userId)
-        .eq('usage_date', today);
-      return data.message_count + 1;
-    } else {
-      await sb
-        .from('daily_usage')
-        .insert({ user_id: userId, usage_date: today, message_count: 1 });
-      return 1;
+    const { data, error } = await sb.rpc('increment_daily_usage', { p_user_id: userId });
+    if (error) {
+      console.error('[credits] increment_daily_usage RPC error:', error.message);
+      return 0;
     }
+    return data ?? 0;
   } catch (e) {
     return 0;
   }
@@ -112,36 +88,25 @@ export async function deductCredits(
   if (!sb) return { success: false, balance: 0, error: '服务未就绪' };
 
   try {
-    const { data: creditRow, error: readErr } = await sb
-      .from('credits')
-      .select('balance')
-      .eq('user_id', userId)
-      .single();
-    if (readErr || !creditRow) return { success: false, balance: 0, error: '无积分记录' };
-
-    const currentBalance = creditRow.balance ?? 0;
-    if (currentBalance < amount) return { success: false, balance: currentBalance, error: '积分不足' };
-
-    const newBalance = currentBalance - amount;
-    const { error: updateErr } = await sb
-      .from('credits')
-      .update({ balance: newBalance, updated_at: new Date().toISOString() })
-      .eq('user_id', userId);
-    if (updateErr) {
-      console.error('[credits] update failed:', updateErr.message);
-      return { success: false, balance: currentBalance, error: '更新失败: ' + updateErr.message };
-    }
-
-    await sb.from('credit_transactions').insert({
-      user_id: userId,
-      amount: -amount,
-      type: 'deduct',
-      description: description,
+    const { data, error } = await sb.rpc('deduct_credits_atomic', {
+      p_user_id: userId,
+      p_amount: amount,
+      p_description: description,
     });
 
-    return { success: true, balance: newBalance };
+    if (error) {
+      console.error('[credits] deduct_credits_atomic RPC error:', error.message);
+      return { success: false, balance: 0, error: 'RPC错误: ' + error.message };
+    }
+
+    const result = data && data[0] ? data[0] : data;
+    if (result && result.success) {
+      return { success: true, balance: result.new_balance };
+    } else {
+      return { success: false, balance: result?.new_balance ?? 0, error: result?.error || '扣减失败' };
+    }
   } catch (e: any) {
-    console.error('[credits] deductCredits error:', e.message);
+    console.error('[credits] deductCredits exception:', e.message);
     return { success: false, balance: 0, error: e.message };
   }
 }
@@ -156,7 +121,7 @@ export async function grantCredits(
   const sb = createServerClient(accessToken);
   if (!sb) return;
   try {
-    const { data } = await sb.from('credits').select('balance').eq('user_id', userId).single();
+    const { data } = await sb.from('credits').select('balance').eq('user_id', userId).maybeSingle();
     const current = data?.balance ?? 0;
     const newBalance = current + amount;
     if (data) {
