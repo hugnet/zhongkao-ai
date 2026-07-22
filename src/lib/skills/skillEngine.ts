@@ -1,4 +1,4 @@
-﻿import { AGENTS } from '@/lib/constants';
+import { AGENTS } from '@/lib/constants';
 
 export class SkillEngine {
   findAgent(agentId: string) {

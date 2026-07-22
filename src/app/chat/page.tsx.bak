@@ -1,4 +1,4 @@
-'use client';
+﻿'use client';
 
 import { useState, useRef, useEffect } from 'react';
 import { Button } from '@/components/ui/button';
@@ -59,20 +59,25 @@ export default function ChatPage() {
 
   async function initCreditsAndHistory(uid: string) {
     var url = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
-    if (!url) { setCredits(100); return; }
+    if (!url) { setCredits(1000); return; }
     try {
       var headers = await restHeaders();
-      var creditRes = await fetch(url + '/rest/v1/rpc/get_credits_balance', { method: 'POST', headers: headers, body: JSON.stringify({ p_user_id: uid }) });
+      var creditRes = await fetch(url + '/rest/v1/credits?user_id=eq.' + uid + '&select=balance', { headers: headers });
       if (creditRes.ok) {
-        var balance = await creditRes.json();
-        setCredits(typeof balance === 'number' ? balance : 1000);
-      } else { setCredits(100); }
-      var histRes = await fetch(url + '/rest/v1/rpc/get_chat_history', { method: 'POST', headers: headers, body: JSON.stringify({ p_user_id: uid }) });
+        var rows = await creditRes.json();
+        if (rows && rows.length > 0) {
+          setCredits(rows[0].balance);
+        } else {
+          await fetch(url + '/rest/v1/credits', { method: 'POST', headers: { ...headers, 'Prefer': 'return=representation' }, body: JSON.stringify({ user_id: uid, balance: 1000 }) });
+          setCredits(1000);
+        }
+      } else { setCredits(1000); }
+      var histRes = await fetch(url + '/rest/v1/chat_history?user_id=eq.' + uid + '&order=updated_at.desc&limit=50&select=id,agent_id,title,messages,updated_at', { headers: headers });
       if (histRes.ok) {
         var hrows = await histRes.json();
         if (hrows) setHistories(hrows.map(function(h: any) { return { id: String(h.id), agent_id: h.agent_id, title: h.title, messages: h.messages || [], updated_at: h.updated_at }; }));
       }
-    } catch(e) { setCredits(100); }
+    } catch(e) { setCredits(1000); }
   }
 
 
@@ -83,10 +88,10 @@ export default function ChatPage() {
       var headers = await restHeaders();
       var encodedMsgs = msgs.map(function(m) { return { role: m.role, content: m.content }; });
       if (histId) {
-        await fetch(url + '/rest/v1/rpc/update_chat_history', { method: 'POST', headers: headers, body: JSON.stringify({ p_id: parseInt(histId), p_user_id: uid, p_title: title, p_messages: encodedMsgs }) });
+        await fetch(url + '/rest/v1/chat_history?id=eq.' + histId + '&user_id=eq.' + uid, { method: 'PATCH', headers: { ...headers, 'Prefer': 'return=minimal' }, body: JSON.stringify({ title, messages: encodedMsgs, updated_at: new Date().toISOString() }) });
       } else {
-        var res = await fetch(url + '/rest/v1/rpc/save_chat_history', { method: 'POST', headers: headers, body: JSON.stringify({ p_user_id: uid, p_agent_id: agentId, p_title: title, p_messages: encodedMsgs }) });
-        if (res.ok) { var newId = await res.json(); if (newId) setCurrentHistoryId(String(newId)); }
+        var res = await fetch(url + '/rest/v1/chat_history', { method: 'POST', headers: { ...headers, 'Prefer': 'return=representation' }, body: JSON.stringify({ user_id: uid, agent_id: agentId, title, messages: encodedMsgs }) });
+        if (res.ok) { var rows = await res.json(); if (rows && rows[0]) setCurrentHistoryId(String(rows[0].id)); }
       }
       initCreditsAndHistory(uid);
     } catch(e) { console.error('save history error:', e); }
@@ -194,10 +199,10 @@ export default function ChatPage() {
                 })}
               </div>
             </div>
-          ) : messages.map(function(msg, msgIdx) {
+          ) : messages.map(function(msg) {
             var isUser = msg.role === 'user';
             return (
-              <div key={msg.id || msgIdx} className={"flex gap-3 animate-fade-in " + (isUser ? "justify-end" : "")}>
+              <div key={msg.id} className={"flex gap-3 animate-fade-in " + (isUser ? "justify-end" : "")}>
                 {!isUser ? <span className="text-2xl shrink-0 mt-1">{subject?.icon}</span> : null}
                 <div className={"max-w-[75%] rounded-2xl px-4 py-3 text-sm leading-relaxed " + (isUser ? "bg-blue-600 text-white" : "bg-white border border-gray-200 text-gray-800")}>
                   {msg.content.split("\n").map(function(line, i) { return <p key={i} className={line.trim() ? "mb-1" : "h-2"}>{line || "\u00A0"}</p>; })}
@@ -225,7 +230,7 @@ export default function ChatPage() {
             <input value={input} onChange={function(e) { setInput(e.target.value); }} onKeyDown={function(e) { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(); } }} placeholder={loggedIn ? ("向" + (agent?.name || "老师") + "提问...") : "请先登录后使用AI对话"} className="flex-1 px-4 py-2.5 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white" disabled={loading} />
             <Button variant="primary" onClick={handleSend} disabled={loading || !input.trim()}>{loading ? "思考中..." : "发送"}</Button>
           </div>
-          {!loggedIn ? <p className="text-xs text-gray-400 mt-2 text-center"><a href="/login" className="text-blue-500 hover:underline">登录</a> 后即可开始AI对话，注册赠送100积分</p> : null}
+          {!loggedIn ? <p className="text-xs text-gray-400 mt-2 text-center"><a href="/login" className="text-blue-500 hover:underline">登录</a> 后即可开始AI对话，注册赠送1000积分</p> : null}
         </div>
       </div>
       <CreditRechargeModal open={showRecharge} balance={lowBalance} message={showRecharge ? (lowBalance === 0 ? 'daily_limit' : 'low_credits') : ''} onClose={function() { setShowRecharge(false); }} />

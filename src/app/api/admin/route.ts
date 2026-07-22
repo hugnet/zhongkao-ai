@@ -1,4 +1,4 @@
-﻿import { NextRequest, NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import { getProvider, buildChatURL } from '@/lib/ai/providers';
 
@@ -34,7 +34,7 @@ export async function GET(req: NextRequest) {
 
     users = (profiles || []).map(function(p) {
       var c = credits?.find(function(cr) { return cr.user_id === p.id; });
-      return { email: p.email, credits: c?.balance ?? 3000, created_at: p.created_at };
+      return { email: p.email, credits: c?.balance ?? 100, created_at: p.created_at };
     });
 
     stats.totalUsers = users.length;

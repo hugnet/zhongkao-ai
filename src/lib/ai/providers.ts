@@ -1,4 +1,4 @@
-﻿export interface LLMProvider {
+export interface LLMProvider {
   id: string;
   name: string;
   baseURL: string;

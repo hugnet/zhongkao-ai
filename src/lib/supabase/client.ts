@@ -1,4 +1,4 @@
-﻿let _sb: any = null;
+let _sb: any = null;
 function getClient() {
   if (_sb) return _sb;
   var url = process.env.NEXT_PUBLIC_SUPABASE_URL || "";

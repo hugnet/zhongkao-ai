@@ -1,4 +1,4 @@
-﻿import { NextRequest, NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 import { skillEngine } from '@/lib/skills/skillEngine';
 import { getCredits, deductCredits, calculateCredits, getUserPlan, getDailyCount, incrementDailyUsage, FREE_DAILY_LIMIT } from '@/lib/credits';
 import { getProvider, buildChatURL } from '@/lib/ai/providers';

@@ -1,4 +1,4 @@
-﻿'use client';
+'use client';
 import Link from 'next/link';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
@@ -50,7 +50,7 @@ export default function PricingPage() {
 
       <div className="text-center mt-12 p-6 bg-gray-50 rounded-2xl">
         <h3 className="font-bold text-gray-900 mb-2">计费透明，按需升级</h3>
-        <p className="text-sm text-gray-500 mb-4">注册即送1000积分，免费每日30次对话。升级会员解锁无限对话。</p>
+        <p className="text-sm text-gray-500 mb-4">注册即送100积分，免费每日30次对话。升级会员解锁无限对话。</p>
         <Link href="/chat">
           <Button variant="primary">免费开始体验</Button>
         </Link>
