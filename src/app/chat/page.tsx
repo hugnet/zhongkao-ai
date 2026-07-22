@@ -65,7 +65,7 @@ export default function ChatPage() {
       var creditRes = await fetch(url + '/rest/v1/rpc/get_credits_balance', { method: 'POST', headers: headers, body: JSON.stringify({ p_user_id: uid }) });
       if (creditRes.ok) {
         var balance = await creditRes.json();
-        setCredits(typeof balance === 'number' ? balance : 1000);
+        setCredits(typeof balance === 'number' ? balance : 100);
       } else { setCredits(100); }
       var histRes = await fetch(url + '/rest/v1/rpc/get_chat_history', { method: 'POST', headers: headers, body: JSON.stringify({ p_user_id: uid }) });
       if (histRes.ok) {

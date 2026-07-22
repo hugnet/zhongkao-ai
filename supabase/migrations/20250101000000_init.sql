@@ -1,4 +1,8 @@
--- 中考提分AI私教 - 完整数据库
+-- 中考提分AI私教 - 完整数据库（一键执行）
+
+-- ============================================
+-- 1. 表结构
+-- ============================================
 
 CREATE TABLE IF NOT EXISTS public.profiles (
   id UUID REFERENCES auth.users ON DELETE CASCADE PRIMARY KEY,
@@ -69,6 +73,10 @@ CREATE TABLE IF NOT EXISTS public.daily_usage (
 );
 CREATE INDEX IF NOT EXISTS idx_daily_usage_user_date ON public.daily_usage(user_id, usage_date);
 
+-- ============================================
+-- 2. RLS 策略
+-- ============================================
+
 ALTER TABLE public.profiles ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.subscriptions ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.credits ENABLE ROW LEVEL SECURITY;
@@ -76,6 +84,16 @@ ALTER TABLE public.credit_transactions ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.chat_history ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.user_settings ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.daily_usage ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS user_profiles_policy ON public.profiles;
+DROP POLICY IF EXISTS user_subscriptions_select ON public.subscriptions;
+DROP POLICY IF EXISTS user_subscriptions_insert ON public.subscriptions;
+DROP POLICY IF EXISTS user_subscriptions_update ON public.subscriptions;
+DROP POLICY IF EXISTS user_credits_policy ON public.credits;
+DROP POLICY IF EXISTS user_credit_tx_policy ON public.credit_transactions;
+DROP POLICY IF EXISTS user_chat_policy ON public.chat_history;
+DROP POLICY IF EXISTS user_settings_policy ON public.user_settings;
+DROP POLICY IF EXISTS user_daily_usage_policy ON public.daily_usage;
 
 CREATE POLICY user_profiles_policy ON public.profiles FOR ALL USING (auth.uid() = id);
 CREATE POLICY user_subscriptions_select ON public.subscriptions FOR SELECT USING (auth.uid() = user_id);
@@ -86,6 +104,10 @@ CREATE POLICY user_credit_tx_policy ON public.credit_transactions FOR ALL USING 
 CREATE POLICY user_chat_policy ON public.chat_history FOR ALL USING (auth.uid() = user_id);
 CREATE POLICY user_settings_policy ON public.user_settings FOR ALL USING (auth.uid() = user_id);
 CREATE POLICY user_daily_usage_policy ON public.daily_usage FOR ALL USING (auth.uid() = user_id);
+
+-- ============================================
+-- 3. 触发器函数
+-- ============================================
 
 CREATE OR REPLACE FUNCTION public.handle_new_user()
 RETURNS TRIGGER AS $$
@@ -116,14 +138,25 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
+DROP TRIGGER IF EXISTS update_profiles_updated_at ON public.profiles;
 CREATE TRIGGER update_profiles_updated_at BEFORE UPDATE ON public.profiles
   FOR EACH ROW EXECUTE FUNCTION public.update_updated_at();
+
+DROP TRIGGER IF EXISTS update_credits_updated_at ON public.credits;
 CREATE TRIGGER update_credits_updated_at BEFORE UPDATE ON public.credits
   FOR EACH ROW EXECUTE FUNCTION public.update_updated_at();
+
+DROP TRIGGER IF EXISTS update_chat_history_updated_at ON public.chat_history;
 CREATE TRIGGER update_chat_history_updated_at BEFORE UPDATE ON public.chat_history
   FOR EACH ROW EXECUTE FUNCTION public.update_updated_at();
+
+DROP TRIGGER IF EXISTS update_user_settings_updated_at ON public.user_settings;
 CREATE TRIGGER update_user_settings_updated_at BEFORE UPDATE ON public.user_settings
   FOR EACH ROW EXECUTE FUNCTION public.update_updated_at();
+
+-- ============================================
+-- 4. RPC 函数（绕过 RLS）
+-- ============================================
 
 CREATE OR REPLACE FUNCTION public.get_credits_balance(p_user_id UUID)
 RETURNS INTEGER AS $$
@@ -204,9 +237,83 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER;
 
-GRANT EXECUTE ON FUNCTION public.deduct_credits_atomic TO authenticated;
+-- ============================================
+-- 5. 聊天历史 RPC 函数（之前缺失的关键函数）
+-- ============================================
+
+CREATE OR REPLACE FUNCTION public.get_chat_history(p_user_id UUID)
+RETURNS TABLE(id BIGINT, agent_id TEXT, title TEXT, messages JSONB, created_at TIMESTAMPTZ, updated_at TIMESTAMPTZ) AS $$
+BEGIN
+  RETURN QUERY
+  SELECT ch.id, ch.agent_id, ch.title, ch.messages, ch.created_at, ch.updated_at
+  FROM public.chat_history ch
+  WHERE ch.user_id = p_user_id
+  ORDER BY ch.updated_at DESC;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+CREATE OR REPLACE FUNCTION public.save_chat_history(
+  p_user_id UUID,
+  p_agent_id TEXT,
+  p_title TEXT,
+  p_messages JSONB
+) RETURNS BIGINT AS $$
+DECLARE v_id BIGINT;
+BEGIN
+  INSERT INTO public.chat_history (user_id, agent_id, title, messages)
+  VALUES (p_user_id, p_agent_id, p_title, p_messages)
+  RETURNING id INTO v_id;
+  RETURN v_id;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+CREATE OR REPLACE FUNCTION public.update_chat_history(
+  p_id BIGINT,
+  p_user_id UUID,
+  p_title TEXT,
+  p_messages JSONB
+) RETURNS VOID AS $$
+BEGIN
+  UPDATE public.chat_history
+  SET title = p_title, messages = p_messages, updated_at = NOW()
+  WHERE id = p_id AND user_id = p_user_id;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+-- ============================================
+-- 6. GRANT 权限
+-- ============================================
+
+GRANT EXECUTE ON FUNCTION public.get_credits_balance TO authenticated;
 GRANT EXECUTE ON FUNCTION public.get_user_plan TO authenticated;
 GRANT EXECUTE ON FUNCTION public.get_daily_message_count TO authenticated;
 GRANT EXECUTE ON FUNCTION public.increment_daily_usage TO authenticated;
-GRANT EXECUTE ON FUNCTION public.get_credits_balance TO authenticated;
+GRANT EXECUTE ON FUNCTION public.deduct_credits_atomic TO authenticated;
 GRANT EXECUTE ON FUNCTION public.grant_credits TO authenticated;
+GRANT EXECUTE ON FUNCTION public.get_chat_history TO authenticated;
+GRANT EXECUTE ON FUNCTION public.save_chat_history TO authenticated;
+GRANT EXECUTE ON FUNCTION public.update_chat_history TO authenticated;
+
+-- ============================================
+-- 7. 修复已有用户数据（积分重置为100）
+-- ============================================
+
+-- 为所有已有用户补建 profiles（如果缺失）
+INSERT INTO public.profiles (id, email)
+SELECT id, email FROM auth.users
+WHERE id NOT IN (SELECT id FROM public.profiles)
+ON CONFLICT (id) DO NOTHING;
+
+-- 为所有已有用户补建积分记录（如果缺失）
+INSERT INTO public.credits (user_id, balance)
+SELECT id, 100 FROM auth.users
+WHERE id NOT IN (SELECT user_id FROM public.credits)
+ON CONFLICT (user_id) DO NOTHING;
+
+-- 重置所有积分为100
+UPDATE public.credits SET balance = 100, total_used = 0, updated_at = NOW();
+
+-- 重置今日限制
+DELETE FROM public.daily_usage WHERE usage_date = CURRENT_DATE;
+
+SELECT '数据库初始化完成！' as result;
