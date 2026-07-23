@@ -27,6 +27,7 @@ export function Header() {
           <Link href="/chat" className="text-gray-600 hover:text-blue-600 transition-colors">AI对话</Link>
           <Link href="/pricing" className="text-gray-600 hover:text-blue-600 transition-colors">定价</Link>
           <Link href="/skills" className="text-gray-600 hover:text-blue-600 transition-colors">技能地图</Link>
+          <Link href="/resources" className="text-gray-600 hover:text-blue-600 transition-colors">领取资料</Link>
           {loggedIn ? (
             <>
               <Link href="/settings" className="text-gray-600 hover:text-blue-600 transition-colors">设置</Link>
