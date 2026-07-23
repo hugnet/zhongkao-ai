@@ -13,13 +13,13 @@ interface CreditRechargeModalProps {
 export function CreditRechargeModal({ open, balance, message, onClose }: CreditRechargeModalProps) {
   if (!open) return null;
 
-  var isDailyLimit = message === 'daily_limit' || (message && message.indexOf('每日') !== -1);
+  var isDailyLimit = message === 'daily_limit';
 
   return (
     <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" onClick={onClose}>
       <div className="bg-white rounded-2xl max-w-md w-full shadow-2xl" onClick={function(e) { e.stopPropagation(); }}>
         <div className="p-6 text-center">
-          <div className="text-5xl mb-4">{isDailyLimit ? '🔒' : '💰'}</div>
+          <div className="text-5xl mb-4">{isDailyLimit ? '⏰' : '💎'}</div>
           <h2 className="text-xl font-bold text-gray-900 mb-2">
             {isDailyLimit ? '今日对话次数已用完' : '积分不足'}
           </h2>
@@ -36,7 +36,7 @@ export function CreditRechargeModal({ open, balance, message, onClose }: CreditR
               </Button>
             </Link>
             <Button variant="outline" className="w-full" onClick={onClose}>
-              稍后再说
+              稍后再试
             </Button>
           </div>
 

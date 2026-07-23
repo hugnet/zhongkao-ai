@@ -29,7 +29,7 @@ export default function PricingPage() {
                 </div>
                 {plan.credits && plan.credits > 0 ? (
                   <div className="mb-4 p-3 bg-blue-50 rounded-xl">
-                    <div className="text-sm font-bold text-blue-600">赠送 {plan.credits.toLocaleString()} 积分</div>
+                    <div className="text-sm font-bold text-blue-600">赠送{plan.credits.toLocaleString()} 积分</div>
                   </div>
                 ) : null}
                 <ul className="text-left space-y-3 mb-8">

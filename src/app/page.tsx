@@ -26,7 +26,7 @@ export default function Home() {
             <Button variant="outline" size="lg">查看定价</Button>
           </Link>
         </div>
-        <p className="text-sm text-gray-400 mt-4">注册送1000积分 · 免费每日30次对话 · 无需API Key</p>
+        <p className="text-sm text-gray-400 mt-4">注册送100积分 · 免费每日30次对话 · 无需API Key</p>
       </section>
 
       <section className="bg-white py-16">

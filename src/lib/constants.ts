@@ -138,7 +138,7 @@ export const SUBJECTS = [
 ];
 
 export const PRICING_PLANS = [
-  { id:'free', name:'免费体验', price:0, period:'永久', description:'每日30次提问', features:['每日30次对话','1000积分','基础AI回答'], popular:false, dailyLimit:30, credits:1000 },
+  { id:'free', name:'免费体验', price:0, period:'永久', description:'每日30次提问', features:['每日30次对话','100积分','基础AI回答'], popular:false, dailyLimit:30, credits:100 },
   { id:'monthly', name:'月度会员', price:39, period:'月', description:'不限对话次数', features:['不限对话次数','全科6位AI专家','技能地图'], popular:false, dailyLimit:-1, credits:0 },
   { id:'yearly', name:'年度会员', price:299, period:'年', description:'不限对话+赠送积分', features:['不限对话次数','全科6位AI专家','技能地图','赠送5000积分','学情诊断','优先更新'], popular:true, dailyLimit:-1, credits:5000 },
 ];
